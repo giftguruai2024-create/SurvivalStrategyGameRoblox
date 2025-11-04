@@ -1,4 +1,5 @@
 -- @ScriptType: ModuleScript
+-- @ScriptType: ModuleScript
 -- StructureManager Module
 -- Interfaces with AllStats and handles structure placement, management, and logic
 -- Called by PlacementModule when placing structures
@@ -560,16 +561,17 @@ function StructureManager:ExecuteSpawn(instanceId, queueEntry)
 	npcInstance:SetAttribute("Health", npcStats.Health)
 	npcInstance:SetAttribute("MaxHealth", npcStats.Health)
 
-	-- Find world folder
+	-- Find proper world subfolder
 	local worldFolder = self:FindWorldFolder()
-	if not worldFolder then
-		warn("[StructureManager] Could not find world folder for NPC spawning")
+	local targetFolder = self:GetOrCreateNPCFolder(worldFolder, queueEntry.team)
+	if not targetFolder then
+		warn("[StructureManager] Could not find/create NPC folder for spawning")
 		npcInstance:Destroy()
 		return false
 	end
 
-	-- Parent to world
-	npcInstance.Parent = worldFolder
+	-- Parent to appropriate folder
+	npcInstance.Parent = targetFolder
 
 	-- Add comprehensive NPC attributes for easy game tracking
 	self:InitializeNPCAttributes(npcInstance, npcStats, queueEntry.owner)
@@ -597,90 +599,146 @@ function StructureManager:ExecuteSpawn(instanceId, queueEntry)
 		print("[StructureManager] NPCManager not available - NPC will not have AI")
 	end
 
-	function StructureManager:InitializeNPCAttributes(npcInstance, npcStats, owner)
-		-- Add comprehensive attributes to NPC for easy game tracking
-		if not npcInstance or not npcStats then
-			return
-		end
-
-		-- Basic NPC Info
-		npcInstance:SetAttribute("NPCId", npcStats.InstanceId)
-		npcInstance:SetAttribute("NPCType", npcStats.UnitType) -- "Worker", "Combat", etc.
-		npcInstance:SetAttribute("NPCName", npcStats.UnitType) -- "VILLAGER", "BUILDER", etc.
-		npcInstance:SetAttribute("Team", npcStats.Team)
-		npcInstance:SetAttribute("Owner", owner or "System")
-		npcInstance:SetAttribute("SpawnTime", tick())
-
-		-- Health & Combat
-		npcInstance:SetAttribute("Health", npcStats.Health)
-		npcInstance:SetAttribute("MaxHealth", npcStats.Health)
-		npcInstance:SetAttribute("Attack", npcStats.Attack or 0)
-		npcInstance:SetAttribute("AttackSpeed", npcStats.AtkSpeed or 1.0)
-		npcInstance:SetAttribute("Range", npcStats.Range or 4)
-		npcInstance:SetAttribute("CanFight", npcStats.CanFight or false)
-
-		-- Movement & Stats
-		npcInstance:SetAttribute("MovementSpeed", npcStats.MovementSpeed or 8)
-		npcInstance:SetAttribute("Level", 1) -- Could be expanded later
-		npcInstance:SetAttribute("Experience", 0)
-
-		-- Work Capabilities
-		npcInstance:SetAttribute("CanBuild", npcStats.CanBuild or false)
-		npcInstance:SetAttribute("CanHarvest", npcStats.CanHarvest or false)
-		npcInstance:SetAttribute("BuildSpeed", npcStats.BuildSpeed or 1.0)
-		npcInstance:SetAttribute("HarvestSpeed", npcStats.HarvestSpeed or 1.0)
-		npcInstance:SetAttribute("HarvestRange", npcStats.HarvestRange or 6)
-
-		-- Inventory & Capacity
-		npcInstance:SetAttribute("CarryCapacity", npcStats.CarryCapacity or 0)
-		npcInstance:SetAttribute("CurrentCarriedWeight", 0)
-		npcInstance:SetAttribute("CarriedWood", 0)
-		npcInstance:SetAttribute("CarriedStone", 0)
-		npcInstance:SetAttribute("CarriedGold", 0)
-		npcInstance:SetAttribute("CarriedFood", 0)
-
-		-- AI State & Task Tracking
-		npcInstance:SetAttribute("CurrentState", "Wandering") -- Will be updated by NPCManager
-		npcInstance:SetAttribute("CurrentTask", "None") -- Will be updated when tasks assigned
-		npcInstance:SetAttribute("TaskStartTime", 0)
-		npcInstance:SetAttribute("LastStateChange", tick())
-		npcInstance:SetAttribute("IsIdle", false)
-		npcInstance:SetAttribute("IsWorking", false)
-		npcInstance:SetAttribute("IsMoving", false)
-
-		-- Position & Grid Tracking
-		if npcInstance.PrimaryPart then
-			local pos = npcInstance.PrimaryPart.Position
-			npcInstance:SetAttribute("WorldX", pos.X)
-			npcInstance:SetAttribute("WorldY", pos.Y)
-			npcInstance:SetAttribute("WorldZ", pos.Z)
-
-			if _G.WorldToGrid then
-				local gridX, gridZ = _G.WorldToGrid(pos)
-				npcInstance:SetAttribute("GridX", gridX)
-				npcInstance:SetAttribute("GridZ", gridZ)
-			end
-		end
-
-		-- Equipment Slots (for future expansion)
-		npcInstance:SetAttribute("EquippedTool", "None")
-		npcInstance:SetAttribute("EquippedWeapon", "None")
-		npcInstance:SetAttribute("EquippedArmor", "None")
-
-		-- Performance Tracking
-		npcInstance:SetAttribute("TasksCompleted", 0)
-		npcInstance:SetAttribute("TotalResourcesHarvested", 0)
-		npcInstance:SetAttribute("TotalDistanceTraveled", 0)
-		npcInstance:SetAttribute("TimeSpentWorking", 0)
-
-		print(string.format("[StructureManager] Added comprehensive attributes to NPC %s (%s)", 
-			npcStats.InstanceId, npcStats.UnitType))
-	end
-
 	print(string.format("[StructureManager] Successfully spawned %s (ID: %s) at %s", 
 		queueEntry.npcType, npcStats.InstanceId, tostring(spawnPosition)))
 
 	return true
+end
+
+function StructureManager:InitializeNPCAttributes(npcInstance, npcStats, owner)
+	-- Add comprehensive attributes to NPC for easy game tracking
+	if not npcInstance or not npcStats then
+		return
+	end
+
+	-- Basic NPC Info
+	npcInstance:SetAttribute("NPCId", npcStats.InstanceId)
+	npcInstance:SetAttribute("NPCType", npcStats.UnitType) -- "Worker", "Combat", etc.
+	npcInstance:SetAttribute("NPCName", npcStats.UnitType) -- "VILLAGER", "BUILDER", etc.
+	npcInstance:SetAttribute("Team", npcStats.Team)
+	npcInstance:SetAttribute("Owner", owner or "System")
+	npcInstance:SetAttribute("SpawnTime", tick())
+
+	-- Health & Combat
+	npcInstance:SetAttribute("Health", npcStats.Health)
+	npcInstance:SetAttribute("MaxHealth", npcStats.Health)
+	npcInstance:SetAttribute("Attack", npcStats.Attack or 0)
+	npcInstance:SetAttribute("AttackSpeed", npcStats.AtkSpeed or 1.0)
+	npcInstance:SetAttribute("Range", npcStats.Range or 4)
+	npcInstance:SetAttribute("CanFight", npcStats.CanFight or false)
+
+	-- Movement & Stats
+	npcInstance:SetAttribute("MovementSpeed", npcStats.MovementSpeed or 8)
+	npcInstance:SetAttribute("Level", 1) -- Could be expanded later
+	npcInstance:SetAttribute("Experience", 0)
+
+	-- Work Capabilities
+	npcInstance:SetAttribute("CanBuild", npcStats.CanBuild or false)
+	npcInstance:SetAttribute("CanHarvest", npcStats.CanHarvest or false)
+	npcInstance:SetAttribute("BuildSpeed", npcStats.BuildSpeed or 1.0)
+	npcInstance:SetAttribute("HarvestSpeed", npcStats.HarvestSpeed or 1.0)
+	npcInstance:SetAttribute("HarvestRange", npcStats.HarvestRange or 6)
+
+	-- Inventory & Capacity
+	npcInstance:SetAttribute("CarryCapacity", npcStats.CarryCapacity or 0)
+	npcInstance:SetAttribute("CurrentCarriedWeight", 0)
+	npcInstance:SetAttribute("CarriedWood", 0)
+	npcInstance:SetAttribute("CarriedStone", 0)
+	npcInstance:SetAttribute("CarriedGold", 0)
+	npcInstance:SetAttribute("CarriedFood", 0)
+
+	-- AI State & Task Tracking
+	npcInstance:SetAttribute("CurrentState", "Wandering") -- Will be updated by NPCManager
+	npcInstance:SetAttribute("CurrentTask", "None") -- Will be updated when tasks assigned
+	npcInstance:SetAttribute("TaskStartTime", 0)
+	npcInstance:SetAttribute("LastStateChange", tick())
+	npcInstance:SetAttribute("IsIdle", false)
+	npcInstance:SetAttribute("IsWorking", false)
+	npcInstance:SetAttribute("IsMoving", false)
+
+	-- Position & Grid Tracking
+	if npcInstance.PrimaryPart then
+		local pos = npcInstance.PrimaryPart.Position
+		npcInstance:SetAttribute("WorldX", pos.X)
+		npcInstance:SetAttribute("WorldY", pos.Y)
+		npcInstance:SetAttribute("WorldZ", pos.Z)
+
+		if _G.WorldToGrid then
+			local gridX, gridZ = _G.WorldToGrid(pos)
+			npcInstance:SetAttribute("GridX", gridX)
+			npcInstance:SetAttribute("GridZ", gridZ)
+		end
+	end
+
+	-- Equipment Slots (for future expansion)
+	npcInstance:SetAttribute("EquippedTool", "None")
+	npcInstance:SetAttribute("EquippedWeapon", "None")
+	npcInstance:SetAttribute("EquippedArmor", "None")
+
+	-- Performance Tracking
+	npcInstance:SetAttribute("TasksCompleted", 0)
+	npcInstance:SetAttribute("TotalResourcesHarvested", 0)
+	npcInstance:SetAttribute("TotalDistanceTraveled", 0)
+	npcInstance:SetAttribute("TimeSpentWorking", 0)
+
+	print(string.format("[StructureManager] Added comprehensive attributes to NPC %s (%s)", 
+		npcStats.InstanceId, npcStats.UnitType))
+end
+
+function StructureManager:GetOrCreateNPCFolder(worldFolder, team)
+	-- Get or create the appropriate NPC folder based on team
+	if not worldFolder then
+		return nil
+	end
+
+	local folderName = team == "Player" and "PlayerNPCs" or "EnemyNPCs"
+	local folder = worldFolder:FindFirstChild(folderName)
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = folderName
+		folder.Parent = worldFolder
+		print(string.format("[StructureManager] Created %s folder", folderName))
+	end
+
+	return folder
+end
+
+function StructureManager:GetOrCreateStructureFolder(worldFolder, team)
+	-- Get or create the appropriate structure folder based on team
+	if not worldFolder then
+		return nil
+	end
+
+	local folderName = team == "Player" and "PlayerStructures" or "EnemyStructures"
+	local folder = worldFolder:FindFirstChild(folderName)
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = folderName
+		folder.Parent = worldFolder
+		print(string.format("[StructureManager] Created %s folder", folderName))
+	end
+
+	return folder
+end
+
+function StructureManager:GetOrCreateResourceFolder(worldFolder)
+	-- Get or create the resource folder
+	if not worldFolder then
+		return nil
+	end
+
+	local folder = worldFolder:FindFirstChild("Resources")
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Resources"
+		folder.Parent = worldFolder
+		print("[StructureManager] Created Resources folder")
+	end
+
+	return folder
 end
 
 function StructureManager:FindNearbySpawnCell(instanceId)
