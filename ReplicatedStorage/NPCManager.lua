@@ -692,15 +692,22 @@ function NPCManager:FindTownHallPosition(instanceId)
 	local npcData = self.managedNPCs[instanceId]
 	if not npcData then return nil end
 
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are in PlayerNPCs folder, get world folder
+	local npcParentFolder = npcData.instance.Parent
+	if not npcParentFolder then return nil end
+
+	local worldFolder = npcParentFolder.Parent
 	if not worldFolder then return nil end
 
-	-- Look for town hall
-	for _, obj in pairs(worldFolder:GetChildren()) do
-		if obj:IsA("Model") and obj:GetAttribute("StructureType") == "Main" then
-			local objTeam = obj:GetAttribute("Team")
-			if objTeam == npcData.stats.Team and obj.PrimaryPart then
-				return obj.PrimaryPart.Position
+	-- Look for town hall in PlayerStructures folder
+	local structuresFolder = worldFolder:FindFirstChild("PlayerStructures")
+	if structuresFolder then
+		for _, obj in pairs(structuresFolder:GetChildren()) do
+			if obj:IsA("Model") and obj:GetAttribute("StructureType") == "Main" then
+				local objTeam = obj:GetAttribute("Team")
+				if objTeam == npcData.stats.Team and obj.PrimaryPart then
+					return obj.PrimaryPart.Position
+				end
 			end
 		end
 	end
@@ -1737,8 +1744,13 @@ function NPCManager:FindNearestBase(instanceId)
 	local npcPosition = npcData.instance.PrimaryPart.Position
 	local npcTeam = npcData.stats.Team
 
-	-- Look for TownHall or other base structures in the same world
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are in PlayerNPCs folder, get world folder
+	local npcParentFolder = npcData.instance.Parent
+	if not npcParentFolder then
+		return nil
+	end
+
+	local worldFolder = npcParentFolder.Parent
 	if not worldFolder then
 		return nil
 	end
@@ -1746,23 +1758,26 @@ function NPCManager:FindNearestBase(instanceId)
 	local nearestBase = nil
 	local nearestDistance = math.huge
 
-	-- Search for structures that could be bases
-	for _, obj in pairs(worldFolder:GetChildren()) do
-		if obj:IsA("Model") and obj:GetAttribute("StructureType") then
-			local structureTeam = obj:GetAttribute("Team")
-			local structureType = obj:GetAttribute("StructureType")
+	-- Search for structures in PlayerStructures folder
+	local structuresFolder = worldFolder:FindFirstChild("PlayerStructures")
+	if structuresFolder then
+		for _, obj in pairs(structuresFolder:GetChildren()) do
+			if obj:IsA("Model") and obj:GetAttribute("StructureType") then
+				local structureTeam = obj:GetAttribute("Team")
+				local structureType = obj:GetAttribute("StructureType")
 
-			-- Look for team structures that are bases (TownHall, etc.)
-			if structureTeam == npcTeam and (structureType == "Main" or structureType == "TOWNHALL") then
-				if obj.PrimaryPart then
-					local distance = (npcPosition - obj.PrimaryPart.Position).Magnitude
-					if distance < nearestDistance then
-						nearestDistance = distance
-						nearestBase = {
-							id = obj:GetAttribute("InstanceId") or obj.Name,
-							position = obj.PrimaryPart.Position,
-							instance = obj
-						}
+				-- Look for team structures that are bases (TownHall, etc.)
+				if structureTeam == npcTeam and (structureType == "Main" or structureType == "TOWNHALL") then
+					if obj.PrimaryPart then
+						local distance = (npcPosition - obj.PrimaryPart.Position).Magnitude
+						if distance < nearestDistance then
+							nearestDistance = distance
+							nearestBase = {
+								id = obj:GetAttribute("InstanceId") or obj.Name,
+								position = obj.PrimaryPart.Position,
+								instance = obj
+							}
+						end
 					end
 				end
 			end
@@ -2002,7 +2017,15 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 	local resourceType = task.data.resourceType
 
 	-- Find the resource instance in the world
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are in PlayerNPCs folder, so we need to go up to the world folder
+	local npcParentFolder = npcData.instance.Parent
+	if not npcParentFolder then
+		self:CompleteTask(instanceId, "Failed - NPC parent not found")
+		return
+	end
+
+	-- Get the world folder (parent of PlayerNPCs folder)
+	local worldFolder = npcParentFolder.Parent
 	if not worldFolder then
 		self:CompleteTask(instanceId, "Failed - World not found")
 		return
