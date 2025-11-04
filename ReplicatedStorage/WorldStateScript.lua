@@ -47,49 +47,12 @@ local CONFIG = {
 		TIME_SCALE = 1, -- Multiplier for time speed (1 = normal)
 	},
 	DEBUG_AI = true,
-	-- Resource spawning configuration
+	-- Resource spawning configuration (now sourced from AllStats)
+	-- Note: Resource stats and properties are managed in AllStats.Resources
 	RESOURCES = {
-		-- Each resource type with its properties
-		WOOD = {
-			name = "Wood",
-			modelName = "Tree",
-			spawnChance = 0.5,
-			maxPerCell = 1,
-			spawnCooldown = 30,
-			value = 10,
-			heightOffset = 0,
-		},
-		STONE = {
-			name = "Stone",
-			modelName = "Rock",
-			spawnChance = 0.3,
-			maxPerCell = 1,
-			spawnCooldown = 45,
-			value = 15,
-			heightOffset = 0,
-		},
-		FOOD = {
-			name = "Food",
-			modelName = nil,
-			spawnChance = 0.5,
-			maxPerCell = 1,
-			spawnCooldown = 20,
-			value = 5,
-			heightOffset = 0,
-			color = Color3.fromRGB(255, 100, 100),
-			size = Vector3.new(1.5, 1.5, 1.5),
-		},
-		GOLD = {
-			name = "Gold",
-			modelName = nil,
-			spawnChance = 0.1,
-			maxPerCell = 1,
-			spawnCooldown = 120,
-			value = 50,
-			heightOffset = 0,
-			color = Color3.fromRGB(255, 215, 0),
-			size = Vector3.new(1, 2, 1),
-		},
+		-- Resource spawning parameters (non-stat related)
+		MAX_PER_CELL = 1, -- Max resources per cell
+		HEIGHT_OFFSET = 0, -- Height offset for spawning
 	},
 
 	-- STRUCTURES configuration (NEW ARRAY)
@@ -149,8 +112,8 @@ function WorldState.new()
 	-- Resource spawn tracking
 	self.lastSpawnCheck = {}
 
-	-- Initialize spawn timers
-	for resourceType, _ in pairs(CONFIG.RESOURCES) do
+	-- Initialize spawn timers using AllStats resource types
+	for resourceType, _ in pairs(AllStats.Resources) do
 		self.lastSpawnCheck[resourceType] = 0
 	end
 
@@ -726,8 +689,8 @@ function WorldState:InitializeCellStates(gridCells, worldFolder) -- Added worldF
 
 			self.resourceInstances[x][z] = {}
 
-			-- Initialize resource counts
-			for resourceType, _ in pairs(CONFIG.RESOURCES) do
+			-- Initialize resource counts using AllStats
+			for resourceType, _ in pairs(AllStats.Resources) do
 				self.cellStates[x][z].resources[resourceType] = 0
 			end
 		end
@@ -1019,8 +982,9 @@ function WorldState:CanSpawnResource(resourceType, x, z)
 	local state = self:GetCellState(x, z)
 	if not state then return false end
 
-	local resourceConfig = CONFIG.RESOURCES[resourceType]
-	if not resourceConfig then return false end
+	-- Get resource stats from AllStats
+	local resourceStats = AllStats:GetResourceStats(resourceType)
+	if not resourceStats then return false end
 
 	-- Check if cell is available
 	if not self:IsCellAvailableForSpawn(x, z) then
@@ -1028,7 +992,8 @@ function WorldState:CanSpawnResource(resourceType, x, z)
 	end
 
 	-- Check if cell already has max resources of this type
-	if state.resources[resourceType] >= resourceConfig.maxPerCell then
+	local maxPerCell = CONFIG.RESOURCES.MAX_PER_CELL or 1
+	if state.resources[resourceType] >= maxPerCell then
 		return false
 	end
 
@@ -1217,21 +1182,25 @@ function WorldState:CollectResource(resourceType, x, z, resourceObject, player)
 	end
 
 	-- Award resource to player (you can customize this)
-	local resourceConfig = CONFIG.RESOURCES[resourceType]
-	print("[WorldState] " .. player.Name .. " collected " .. resourceType .. " (Value: " .. resourceConfig.value .. ")")
+	local resourceStats = AllStats:GetResourceStats(resourceType)
+	if resourceStats then
+		print("[WorldState] " .. player.Name .. " collected " .. resourceType .. " (Value: " .. resourceStats.Value .. ")")
+	end
 
 	-- You can add to player's inventory here
 	-- Example: add to leaderstats
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if leaderstats then
-		local resourceStat = leaderstats:FindFirstChild(resourceConfig.name)
-		if not resourceStat then
-			resourceStat = Instance.new("IntValue")
-			resourceStat.Name = resourceConfig.name
-			resourceStat.Value = 0
-			resourceStat.Parent = leaderstats
+	if resourceStats then
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local resourceStat = leaderstats:FindFirstChild(resourceStats.Name)
+			if not resourceStat then
+				resourceStat = Instance.new("IntValue")
+				resourceStat.Name = resourceStats.Name
+				resourceStat.Value = 0
+				resourceStat.Parent = leaderstats
+			end
+			resourceStat.Value = resourceStat.Value + resourceStats.Value
 		end
-		resourceStat.Value = resourceStat.Value + resourceConfig.value
 	end
 end
 
@@ -1353,7 +1322,8 @@ end
 
 function WorldState:GetTotalResources()
 	local totals = {}
-	for resourceType, _ in pairs(CONFIG.RESOURCES) do
+	-- Initialize totals using AllStats resource types
+	for resourceType, _ in pairs(AllStats.Resources) do
 		totals[resourceType] = 0
 	end
 
