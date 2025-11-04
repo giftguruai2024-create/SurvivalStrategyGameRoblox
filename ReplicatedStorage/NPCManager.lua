@@ -90,6 +90,13 @@ function NPCManager.new(config)
 	self.lastUpdateTime = tick()
 	self.updateConnection = nil
 
+	self.worldState = nil
+	self.gridMapper = {
+		WorldToGrid = nil,
+		GridToWorld = nil,
+		GetCell = nil,
+	}
+
 	-- Initialize state tracking
 	for _, state in pairs(NPCStates) do
 		self.npcsByState[state] = {}
@@ -97,6 +104,36 @@ function NPCManager.new(config)
 
 	print("[NPCManager] Initialized with", self.config.UPDATE_FREQUENCY, "updates per second")
 	return self
+end
+
+function NPCManager:ConfigureDependencies(services)
+	if not services then
+		return
+	end
+
+	if services.worldState then
+		self.worldState = services.worldState
+	end
+
+	if services.gridMapper then
+		self.gridMapper.WorldToGrid = services.gridMapper.WorldToGrid or self.gridMapper.WorldToGrid
+		self.gridMapper.GridToWorld = services.gridMapper.GridToWorld or self.gridMapper.GridToWorld
+		self.gridMapper.GetCell = services.gridMapper.GetCell or self.gridMapper.GetCell
+	end
+end
+
+function NPCManager:SetWorldState(worldState)
+	self.worldState = worldState
+end
+
+function NPCManager:SetGridMapper(mapper)
+	if not mapper then
+		return
+	end
+
+	self.gridMapper.WorldToGrid = mapper.WorldToGrid or self.gridMapper.WorldToGrid
+	self.gridMapper.GridToWorld = mapper.GridToWorld or self.gridMapper.GridToWorld
+	self.gridMapper.GetCell = mapper.GetCell or self.gridMapper.GetCell
 end
 
 -- ========================================
@@ -217,12 +254,11 @@ function NPCManager:UnregisterNPC(instanceId, reason)
 	-- Unregister NPC from WorldState cell tracking
 	if npcData.instance and npcData.instance.PrimaryPart then
 		local npcGridX, npcGridZ = 0, 0
-		if _G.WorldToGrid then
-			npcGridX, npcGridZ = _G.WorldToGrid(npcData.instance.PrimaryPart.Position)
+		if self.gridMapper.WorldToGrid then
+			npcGridX, npcGridZ = self.gridMapper.WorldToGrid(npcData.instance.PrimaryPart.Position)
 
-			local worldState = _G.WorldState
-			if worldState then
-				worldState:UnregisterNPCFromCell(npcGridX, npcGridZ, instanceId)
+			if self.worldState then
+				self.worldState:UnregisterNPCFromCell(npcGridX, npcGridZ, instanceId)
 			end
 		end
 	end

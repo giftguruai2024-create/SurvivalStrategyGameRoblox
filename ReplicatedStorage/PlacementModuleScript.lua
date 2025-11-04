@@ -5,6 +5,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StructureManager = require(ReplicatedStorage:WaitForChild("StructureManager"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 
 local PlacementModule = {}
 PlacementModule.__index = PlacementModule
@@ -12,10 +13,12 @@ PlacementModule.__index = PlacementModule
 -- ========================================
 -- CONFIGURATION
 -- ========================================
+local placementDefaults = GameConfig.GetPlacement()
+
 local DEFAULT_CONFIG = {
-	CELL_SIZE = 3, -- Size of each grid cell in studs
-	PLACEMENT_HEIGHT_OFFSET = 0, -- Additional height offset for placed structures
-	DEBUG_PLACEMENT = true, -- Enable debug prints
+	CELL_SIZE = placementDefaults.CELL_SIZE,
+	PLACEMENT_HEIGHT_OFFSET = placementDefaults.PLACEMENT_HEIGHT_OFFSET,
+	DEBUG_PLACEMENT = placementDefaults.DEBUG_PLACEMENT,
 }
 
 -- ========================================

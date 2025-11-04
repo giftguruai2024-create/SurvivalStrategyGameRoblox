@@ -1,16 +1,12 @@
 -- @ScriptType: ModuleScript
 -- @ScriptType: ModuleScript
 -- StructureManager Module
--- Interfaces with AllStats and handles structure placement, management, and logic
+-- Interfaces with shared game catalogs and handles structure placement, management, and logic
 -- Called by PlacementModule when placing structures
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AllStats = require(ReplicatedStorage:WaitForChild("AllStats"))
-
--- Unit model references
-local unitsFolder = ReplicatedStorage:WaitForChild("Units")
-local playerUnitsFolder = unitsFolder:WaitForChild("Player")
-local worldAIUnitsFolder = unitsFolder:WaitForChild("WorldAI")
+local GameCatalog = require(ReplicatedStorage:WaitForChild("GameCatalog"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 
 local StructureManager = {}
 StructureManager.__index = StructureManager
@@ -19,7 +15,7 @@ StructureManager.__index = StructureManager
 -- STRUCTURE MANAGER CLASS
 -- ========================================
 
-function StructureManager.new()
+function StructureManager.new(dependencies)
 	local self = setmetatable({}, StructureManager)
 
 	-- Track all placed structures
@@ -32,8 +28,58 @@ function StructureManager.new()
 	self.spawnQueues = {} -- {instanceId = {queue = {}, lastSpawnTime = 0, isPaused = false}}
 	self.globalQueueId = 0 -- For unique queue entry IDs
 
+	self.worldState = nil
+	self.npcManager = nil
+	self.gridMapper = {
+		WorldToGrid = nil,
+		GridToWorld = nil,
+		GetCell = nil,
+	}
+
+	if dependencies then
+		self:ConfigureDependencies(dependencies)
+	end
+
 	print("[StructureManager] Initialized with queue management")
 	return self
+end
+
+function StructureManager:ConfigureDependencies(services)
+	if not services then
+		return
+	end
+
+	if services.worldState then
+		self.worldState = services.worldState
+	end
+
+	if services.npcManager then
+		self.npcManager = services.npcManager
+	end
+
+	if services.gridMapper then
+		self.gridMapper.WorldToGrid = services.gridMapper.WorldToGrid or self.gridMapper.WorldToGrid
+		self.gridMapper.GridToWorld = services.gridMapper.GridToWorld or self.gridMapper.GridToWorld
+		self.gridMapper.GetCell = services.gridMapper.GetCell or self.gridMapper.GetCell
+	end
+end
+
+function StructureManager:SetWorldState(worldState)
+	self.worldState = worldState
+end
+
+function StructureManager:SetNPCManager(npcManager)
+	self.npcManager = npcManager
+end
+
+function StructureManager:SetGridMapper(mapper)
+	if not mapper then
+		return
+	end
+
+	self.gridMapper.WorldToGrid = mapper.WorldToGrid or self.gridMapper.WorldToGrid
+	self.gridMapper.GridToWorld = mapper.GridToWorld or self.gridMapper.GridToWorld
+	self.gridMapper.GetCell = mapper.GetCell or self.gridMapper.GetCell
 end
 
 -- ========================================
@@ -41,17 +87,17 @@ end
 -- ========================================
 
 function StructureManager:GetStructureStats(structureType, team, owner)
-	-- Get structure stats from AllStats with owner information
+	-- Get structure stats from shared catalog with owner information
 	team = team or "Player"
 
-	local stats = AllStats:GetStructureStats(structureType, team)
-	if not stats then
+	local definition = GameCatalog.GetStructureDefinition(structureType, team)
+	if not definition then
 		warn("[StructureManager] Invalid structure type:", structureType, "for team:", team)
 		return nil
 	end
 
 	-- Create instance with owner
-	local instanceStats = AllStats:CreateInstance(
+	local instanceStats = GameCatalog.CreateInstance(
 		team == "Player" and "PlayerStructures" or "EnemyStructures",
 		structureType,
 		owner
@@ -86,13 +132,13 @@ end
 
 function StructureManager:GetStructureCost(structureType, team)
 	-- Get the resource cost for building a structure
-	local stats = AllStats:GetStructureStats(structureType, team)
+	local stats = GameCatalog.GetStructureDefinition(structureType, team or "Player")
 	return stats and stats.Cost or {}
 end
 
 function StructureManager:GetBuildTime(structureType, team)
 	-- Get the build time for a structure
-	local stats = AllStats:GetStructureStats(structureType, team)
+	local stats = GameCatalog.GetStructureDefinition(structureType, team or "Player")
 	return stats and stats.BuildTime or 0
 end
 
@@ -277,7 +323,7 @@ function StructureManager:AddToQueue(instanceId, npcType, priority, customSpawnT
 	end
 
 	-- Get base spawn time from NPC stats
-	local npcStats = AllStats:GetNPCStats(npcType, stats.Team)
+	local npcStats = GameCatalog.GetNPCDefinition(npcType, stats.Team)
 	if not npcStats then
 		warn("[StructureManager] Invalid NPC type:", npcType)
 		return false
@@ -528,7 +574,7 @@ function StructureManager:ExecuteSpawn(instanceId, queueEntry)
 	end
 
 	-- Create NPC stats instance
-	local npcStats = AllStats:CreateInstance(
+	local npcStats = GameCatalog.CreateInstance(
 		queueEntry.team == "Player" and "PlayerNPCs" or "EnemyNPCs",
 		queueEntry.npcType,
 		queueEntry.owner
@@ -578,18 +624,17 @@ function StructureManager:ExecuteSpawn(instanceId, queueEntry)
 
 	-- Register NPC position in WorldState for cell tracking
 	local npcGridX, npcGridZ = 0, 0
-	if _G.WorldToGrid then
-		npcGridX, npcGridZ = _G.WorldToGrid(spawnPosition)
+	if self.gridMapper.WorldToGrid then
+		npcGridX, npcGridZ = self.gridMapper.WorldToGrid(spawnPosition)
 
-		local worldState = _G.WorldState
-		if worldState then
-			worldState:RegisterNPCInCell(npcGridX, npcGridZ, npcStats.InstanceId)
+		if self.worldState then
+			self.worldState:RegisterNPCInCell(npcGridX, npcGridZ, npcStats.InstanceId)
 		end
 	end
 
 	-- Initialize NPCManager if available (for AI)
-	if _G.NPCManager then
-		local success = _G.NPCManager:RegisterNPC(npcInstance, npcStats, queueEntry.owner)
+	if self.npcManager then
+		local success = self.npcManager:RegisterNPC(npcInstance, npcStats, queueEntry.owner)
 		if success then
 			print(string.format("[StructureManager] NPC %s registered with NPCManager for AI", npcStats.InstanceId))
 		else
@@ -663,8 +708,8 @@ function StructureManager:InitializeNPCAttributes(npcInstance, npcStats, owner)
 		npcInstance:SetAttribute("WorldY", pos.Y)
 		npcInstance:SetAttribute("WorldZ", pos.Z)
 
-		if _G.WorldToGrid then
-			local gridX, gridZ = _G.WorldToGrid(pos)
+		if self.gridMapper.WorldToGrid then
+			local gridX, gridZ = self.gridMapper.WorldToGrid(pos)
 			npcInstance:SetAttribute("GridX", gridX)
 			npcInstance:SetAttribute("GridZ", gridZ)
 		end
@@ -751,20 +796,18 @@ function StructureManager:FindNearbySpawnCell(instanceId)
 	local structurePos = structureData.instance.PrimaryPart.Position
 
 	-- Get grid position of structure using global helper function
-	local structureGridX, structureGridZ = 0, 0
-	if _G.WorldToGrid then
-		structureGridX, structureGridZ = _G.WorldToGrid(structurePos)
-	else
-		warn("[StructureManager] WorldToGrid function not available")
+	if not self.gridMapper.WorldToGrid then
+		warn("[StructureManager] WorldToGrid mapper not available")
 		return nil
 	end
 
-	-- Get WorldState for cell checking
-	local worldState = _G.WorldState
-	if not worldState then
-		warn("[StructureManager] WorldState not available for cell checking")
+	if not self.worldState then
+		warn("[StructureManager] WorldState reference not available for spawn cell search")
 		return nil
 	end
+
+	local structureGridX, structureGridZ = self.gridMapper.WorldToGrid(structurePos)
+	local worldState = self.worldState
 
 	print(string.format("[StructureManager] Searching for spawn cell near structure at (%d, %d)", structureGridX, structureGridZ))
 
@@ -781,8 +824,8 @@ function StructureManager:FindNearbySpawnCell(instanceId)
 					if worldState:IsCellAvailableForSpawn(checkX, checkZ) then
 						-- Get the actual cell part
 						local cell = nil
-						if _G.GetCell then
-							cell = _G.GetCell(checkX, checkZ)
+						if self.gridMapper.GetCell then
+							cell = self.gridMapper.GetCell(checkX, checkZ)
 						end
 
 						if cell then
@@ -803,9 +846,8 @@ end
 
 function StructureManager:IsCellAvailableForSpawn(gridX, gridZ)
 	-- Use WorldState for cell availability checking instead of local tracking
-	local worldState = _G.WorldState
-	if worldState then
-		return worldState:IsCellAvailableForSpawn(gridX, gridZ)
+	if self.worldState then
+		return self.worldState:IsCellAvailableForSpawn(gridX, gridZ)
 	else
 		warn("[StructureManager] WorldState not available, using fallback method")
 		return self:FallbackCellCheck(gridX, gridZ)
@@ -826,11 +868,12 @@ function StructureManager:FallbackCellCheck(gridX, gridZ)
 	end
 
 	-- Check if cell is in valid spawn area (grass area, not beach)
-	local totalGridSize = 30 + (2 * 2) -- GRID_SIZE + (BEACH_THICKNESS * 2) 
-	local grassStartX = 2 + 1  -- BEACH_THICKNESS + 1
-	local grassEndX = 2 + 30   -- BEACH_THICKNESS + GRID_SIZE
-	local grassStartZ = 2 + 1
-	local grassEndZ = 2 + 30
+	local gridConfig = GameConfig.GetGrid()
+	local totalGridSize = gridConfig.GRID_SIZE + (gridConfig.BEACH_THICKNESS * 2)
+	local grassStartX = gridConfig.BEACH_THICKNESS + 1
+	local grassEndX = gridConfig.BEACH_THICKNESS + gridConfig.GRID_SIZE
+	local grassStartZ = gridConfig.BEACH_THICKNESS + 1
+	local grassEndZ = gridConfig.BEACH_THICKNESS + gridConfig.GRID_SIZE
 
 	if gridX < grassStartX or gridX > grassEndX or gridZ < grassStartZ or gridZ > grassEndZ then
 		return false -- Outside valid spawn area
@@ -941,7 +984,7 @@ function StructureManager:AddFreeStartingVillager(instanceId)
 
 	-- Create a special free villager queue entry
 	self.globalQueueId = self.globalQueueId + 1
-	local npcStats = AllStats:GetNPCStats("VILLAGER", stats.Team)
+	local npcStats = GameCatalog.GetNPCDefinition("VILLAGER", stats.Team)
 	if not npcStats then
 		warn("[StructureManager] Could not get Villager stats")
 		return false
@@ -1297,21 +1340,7 @@ end
 -- ========================================
 
 function StructureManager:GetUnitModel(npcType, team)
-	-- Get the 3D model for a specific unit type and team
-	local folder = team == "Player" and playerUnitsFolder or worldAIUnitsFolder
-
-	local model = folder:FindFirstChild(npcType)
-	if not model then
-		warn("[StructureManager] Unit model not found:", npcType, "for team:", team)
-		return nil
-	end
-
-	if not model:IsA("Model") then
-		warn("[StructureManager] Found object is not a model:", npcType)
-		return nil
-	end
-
-	return model
+	return GameCatalog.GetUnitModel(team or "Player", npcType)
 end
 
 return StructureManager

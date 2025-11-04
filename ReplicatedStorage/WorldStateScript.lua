@@ -6,82 +6,28 @@
 -- Manages world time, grid cell states, and resource spawning
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerStorage = game:GetService("ServerStorage") -- Added for completeness
 
 -- Import required modules
 local PlacementModule = require(ReplicatedStorage:WaitForChild("PlacementModuleScript"))
-local AllStats = require(ReplicatedStorage:WaitForChild("AllStats"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+local GameCatalog = require(ReplicatedStorage:WaitForChild("GameCatalog"))
+local AllStats = GameCatalog.GetAllStatsModule()
 
 local WorldState = {}
 WorldState.__index = WorldState
 
 -- ========================================
--- RESOURCE/STRUCTURE MODEL REFERENCES
--- ========================================
-local resourcesFolder = ReplicatedStorage:WaitForChild("Resources")
-local structuresFolder = ReplicatedStorage:WaitForChild("Structures") -- New folder reference
-
--- Dedicated table for Resources
-local resourceModels = {
-	WOOD = resourcesFolder:WaitForChild("Tree"),
-	STONE = resourcesFolder:WaitForChild("Rock"),
-	FOOD = resourcesFolder:WaitForChild("Food"),
-	GOLD = resourcesFolder:WaitForChild("Gold"),
-	-- Add more resource mappings
-}
-
--- Dedicated table for Structures (NEW)
-local structureModels = {
-	TOWNHALL = structuresFolder:WaitForChild("TownHall"),
-	-- Add more structure mappings here (e.g., BARRACKS, WALL)
-}
-
--- ========================================
 -- CONFIGURATION
 -- ========================================
 local CONFIG = {
-	-- Time system configuration
-	TIME = {
-		DAY_LENGTH = 600, -- Real seconds for a full day cycle (10 minutes)
-		START_TIME = 6, -- Starting hour (0-24)
-		TIME_SCALE = 1, -- Multiplier for time speed (1 = normal)
-	},
+	TIME = GameConfig.GetTime(),
+	SPAWN = GameConfig.GetSpawn(),
+	GRID = GameConfig.GetGrid(),
+	PLACEMENT = GameConfig.GetPlacement(),
 	DEBUG_AI = true,
-	-- Resource spawning configuration (now sourced from AllStats)
-	-- Note: Resource stats and properties are managed in AllStats.Resources
 	RESOURCES = {
-		-- Resource spawning parameters (non-stat related)
-		MAX_PER_CELL = 1, -- Max resources per cell
-		HEIGHT_OFFSET = 0, -- Height offset for spawning
-	},
-
-	-- STRUCTURES configuration (NEW ARRAY)
-	STRUCTURES = {
-		TOWNHALL = {
-			name = "Town Hall",
-			modelName = "TownHall", -- Corresponds to the key in structureModels
-			health = 500,
-			buildTime = 60,
-			canBeAttacked = true,
-			-- Add more properties like required resources
-		},
-		-- Future Structures:
-		-- BARRACKS = { ... },
-		-- WALL = { ... },
-	},
-
-	-- Grid configuration (should match your main script)
-	GRID = {
-		GRID_SIZE = 30,
-		CELL_SIZE = 3,
-		BEACH_THICKNESS = 2,
-	},
-
-	-- Spawning behavior
-	SPAWN = {
-		CHECK_INTERVAL = 5,
-		RESOURCE_HEIGHT_OFFSET = 2,
-		ENABLE_AUTO_SPAWN = true,
+		MAX_PER_CELL = GameConfig.GetSpawn().MAX_PER_CELL,
+		HEIGHT_OFFSET = GameConfig.GetSpawn().RESOURCE_HEIGHT_OFFSET,
 	},
 }
 
@@ -105,9 +51,12 @@ function WorldState.new()
 	self.cellStates = {} -- Stores state for each cell
 	self.resourceInstances = {} -- Stores actual resource part instances
 	self.structureInstances = {} -- Stores structure instances (NEW)
+	self.resourceModelCache = {}
+	self.structureModelCache = {}
 
 	-- Reference to StructureManager (will be set later)
 	self.structureManager = nil
+	self.npcManager = nil
 
 	-- Resource spawn tracking
 	self.lastSpawnCheck = {}
@@ -119,8 +68,9 @@ function WorldState.new()
 
 	-- Initialize PlacementModule
 	self.placementModule = PlacementModule.new({
-		CELL_SIZE = CONFIG.GRID.CELL_SIZE,
-		DEBUG_PLACEMENT = true,
+		CELL_SIZE = CONFIG.PLACEMENT.CELL_SIZE,
+		PLACEMENT_HEIGHT_OFFSET = CONFIG.PLACEMENT.PLACEMENT_HEIGHT_OFFSET,
+		DEBUG_PLACEMENT = CONFIG.PLACEMENT.DEBUG_PLACEMENT,
 	})
 
 	-- Initialize town hall storage
@@ -139,6 +89,10 @@ function WorldState:SetStructureManager(structureManager)
 	-- Set reference to StructureManager for registering placed structures
 	self.structureManager = structureManager
 	print("[WorldState] StructureManager reference set")
+end
+
+function WorldState:SetNPCManager(npcManager)
+	self.npcManager = npcManager
 end
 
 function WorldState:InitializeTownHallStorage()
@@ -525,8 +479,8 @@ end
 
 function WorldState:NotifyVillagersOfNewTask()
 	-- Notify villagers that there are new harvest tasks available
-	if _G.NPCManager then
-		_G.NPCManager:CheckForNewHarvestTasks()
+	if self.npcManager then
+		self.npcManager:CheckForNewHarvestTasks()
 	end
 end
 
@@ -610,22 +564,42 @@ end
 -- ========================================
 
 function WorldState:RegisterResourceModel(resourceType, model)
-	if model and model:IsA("Model") then
-		resourceModels[resourceType] = model
-		print("[WorldState] Registered model for resource " .. resourceType)
-		return true
-	else
-		warn("[WorldState] Failed to register model for resource " .. resourceType .. " - not a valid model")
+	if not (resourceType and model) then
 		return false
 	end
+
+	if not model:IsA("Model") then
+		warn("[WorldState] Failed to register resource model - expected Model for " .. tostring(resourceType))
+		return false
+	end
+
+	self.resourceModelCache[resourceType] = model
+	print("[WorldState] Registered resource model override for " .. resourceType)
+	return true
 end
 
 function WorldState:GetResourceModel(resourceType)
-	return resourceModels[resourceType]
+	if self.resourceModelCache[resourceType] then
+		return self.resourceModelCache[resourceType]
+	end
+
+	local model = GameCatalog.GetResourceModel(resourceType)
+	if model then
+		self.resourceModelCache[resourceType] = model
+	end
+	return model
 end
 
-function WorldState:GetStructureModel(structureType) -- NEW
-	return structureModels[structureType]
+function WorldState:GetStructureModel(structureType)
+	if self.structureModelCache[structureType] then
+		return self.structureModelCache[structureType]
+	end
+
+	local model = GameCatalog.GetStructureModel(structureType)
+	if model then
+		self.structureModelCache[structureType] = model
+	end
+	return model
 end
 
 function WorldState:GetOrCreateResourceFolder(worldFolder)
@@ -727,7 +701,7 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 
 	local structureType = "TOWNHALL"
 	local townHallModel = self:GetStructureModel(structureType)
-	local structureConfig = CONFIG.STRUCTURES[structureType]
+	local structureTemplate = GameCatalog.GetStructureDefinition(structureType, "Player")
 
 	-- Debug: Check model existence
 	print("[WorldState] TownHall model found:", townHallModel ~= nil)
@@ -763,7 +737,7 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, "Player")
 
 	local placementOptions = {
-		name = structureConfig.name .. "_Initial",
+		name = structureType .. "_Initial",
 		structureType = structureType,
 		heightOffset = 0,
 		randomRotation = true,
@@ -772,7 +746,7 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 		makeVisible = true,
 		attributes = {
 			StructureType = structureType,
-			Health = structureConfig.health,
+			Health = structureTemplate and structureTemplate.Health or 0,
 		},
 		gridBounds = {
 			minX = grassStartX,
@@ -813,7 +787,7 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 			local playerName = firstPlayer and firstPlayer.Name or "Player1"
 
 			-- Create structure stats for the TownHall with proper player assignment
-			local stats = AllStats:CreateInstance("PlayerStructures", structureType, playerName)
+			local stats = GameCatalog.CreateInstance("PlayerStructures", structureType, playerName)
 			if not stats then
 				warn("[WorldState] Failed to create TownHall stats")
 			else
@@ -856,9 +830,10 @@ end
 function WorldState:PlaceStructureAt(structureType, gridX, gridZ, gridCells, worldFolder, options)
 	-- Generic function to place any structure at a specific location
 	local structureModel = self:GetStructureModel(structureType)
-	local structureConfig = CONFIG.STRUCTURES[structureType]
+	local team = options and options.team or "Player"
+	local structureTemplate = GameCatalog.GetStructureDefinition(structureType, team)
 
-	if not structureModel or not structureConfig then
+	if not structureModel or not structureTemplate then
 		warn("[WorldState] Invalid structure type:", structureType)
 		return nil
 	end
@@ -869,16 +844,15 @@ function WorldState:PlaceStructureAt(structureType, gridX, gridZ, gridCells, wor
 	end
 
 	-- Get proper structure folder based on options
-	local team = options and options.team or "Player"
 	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, team)
 
 	-- Merge default options with provided options
 	local placementOptions = options or {}
-	placementOptions.name = placementOptions.name or (structureConfig.name .. "_" .. gridX .. "_" .. gridZ)
+	placementOptions.name = placementOptions.name or (structureType .. "_" .. gridX .. "_" .. gridZ)
 	placementOptions.structureType = structureType
 	placementOptions.attributes = placementOptions.attributes or {}
 	placementOptions.attributes.StructureType = structureType
-	placementOptions.attributes.Health = structureConfig.health
+	placementOptions.attributes.Health = structureTemplate.Health
 
 	-- Place structure at specific location using proper folder
 	local structureInstance = self.placementModule:PlaceStructure(
@@ -918,9 +892,10 @@ end
 function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCells, worldFolder, options)
 	-- Place a structure near a specific location
 	local structureModel = self:GetStructureModel(structureType)
-	local structureConfig = CONFIG.STRUCTURES[structureType]
+	local team = options and options.team or "Player"
+	local structureTemplate = GameCatalog.GetStructureDefinition(structureType, team)
 
-	if not structureModel or not structureConfig then
+	if not structureModel or not structureTemplate then
 		warn("[WorldState] Invalid structure type:", structureType)
 		return nil
 	end
@@ -931,7 +906,6 @@ function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCell
 	end
 
 	-- Get proper structure folder based on options
-	local team = options and options.team or "Player"
 	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, team)
 
 	-- Merge default options with provided options
@@ -939,7 +913,7 @@ function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCell
 	placementOptions.structureType = structureType
 	placementOptions.attributes = placementOptions.attributes or {}
 	placementOptions.attributes.StructureType = structureType
-	placementOptions.attributes.Health = structureConfig.health
+	placementOptions.attributes.Health = structureTemplate.Health
 
 	-- Place structure near target location using proper folder
 	local structureInstance, blockedCells, placedX, placedZ = self.placementModule:PlaceNearLocation(
@@ -1034,7 +1008,7 @@ function WorldState:SpawnResource(resourceType, x, z, gridCells, worldFolder)
 	end
 
 	-- Get model from resources folder
-	local resourceModel = resourceModels[resourceType]
+	local resourceModel = self:GetResourceModel(resourceType)
 	if not resourceModel then
 		warn("[WorldState] Resource model not found for " .. resourceType .. " (looking for " .. modelName .. ")")
 		return false

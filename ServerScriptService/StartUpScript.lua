@@ -5,49 +5,47 @@
 -- Place this in ServerScriptService
 
 local Players = game:GetService("Players")
-local replicated = game:GetService('ReplicatedStorage')
+local replicated = game:GetService("ReplicatedStorage")
 
--- Module requires - THIS WAS MISSING!
+-- Module requires
 local WorldStateModule = require(replicated:WaitForChild("WorldStateScript"))
 local StructureManagerModule = require(replicated:WaitForChild("StructureManager"))
 local NPCManagerModule = require(replicated:WaitForChild("NPCManager"))
+local GameConfig = require(replicated:WaitForChild("GameConfig"))
+local EventBus = require(replicated:WaitForChild("EventBus"))
 
-local events = replicated:WaitForChild('Events')
-local ClickedRemote = Instance.new("RemoteEvent")
-ClickedRemote.Name = "Clicked"
-ClickedRemote.Parent = events
+EventBus.Initialize({
+	Clicked = "RemoteEvent",
+	SelectResource = "RemoteEvent",
+	CreateHarvestTask = "RemoteEvent",
+	GridReady = "RemoteEvent",
+})
 
--- Resource selection remote events
-local selectResourceRemote = Instance.new("RemoteEvent")
-selectResourceRemote.Name = "SelectResource"
-selectResourceRemote.Parent = events
-
-local createHarvestTaskRemote = Instance.new("RemoteEvent")
-createHarvestTaskRemote.Name = "CreateHarvestTask"
-createHarvestTaskRemote.Parent = events
-
-local cameraReadyEvent = Instance.new("RemoteEvent")
-cameraReadyEvent.Name = "GridReady"
-cameraReadyEvent.Parent = events
+local events = EventBus.GetEventsFolder()
+local ClickedRemote = EventBus.GetRemote("Clicked")
+local selectResourceRemote = EventBus.GetRemote("SelectResource")
+local createHarvestTaskRemote = EventBus.GetRemote("CreateHarvestTask")
+local cameraReadyEvent = EventBus.GetRemote("GridReady")
 -- ========================================
 -- WORLDSTATE INTEGRATION
 -- ========================================
 
 -- Declare worldState variable at the top level
 local worldState
+local structureManager
+local npcManager
 
 -- ========================================
--- CONFIGURATION - Adjust these values!
+-- CONFIGURATION (shared via GameConfig)
 -- ========================================
-local GRID_SIZE = 30 -- Number of cells in each direction for playable area (100x100)
-local CELL_SIZE = 3 -- Size of each cell in studs (2x2x2)
-local MIN_SPAWN_DISTANCE = 10 -- Minimum distance between players (in cells)
+local GRID_CONFIG = GameConfig.GetGrid()
+local CAMERA_CONFIG = GameConfig.GetCamera()
 
--- Beach configuration
-local BEACH_THICKNESS = 2 -- Number of cells for beach border (2 cells = 4 studs with CELL_SIZE of 2)
-
--- Camera configuration
-local INITIAL_HEIGHT = 50 -- Initial camera height above grid center
+local GRID_SIZE = GRID_CONFIG.GRID_SIZE
+local CELL_SIZE = GRID_CONFIG.CELL_SIZE
+local MIN_SPAWN_DISTANCE = GRID_CONFIG.MIN_SPAWN_DISTANCE
+local BEACH_THICKNESS = GRID_CONFIG.BEACH_THICKNESS
+local INITIAL_HEIGHT = CAMERA_CONFIG.INITIAL_HEIGHT
 -- ========================================
 
 -- Grid variables
@@ -199,20 +197,19 @@ local function createGrid(firstPlayerName)
 	worldState = WorldStateModule.new()
 
 	-- Initialize StructureManager and connect it to WorldState
-	local structureManager = StructureManagerModule.new()
+	structureManager = StructureManagerModule.new()
 
 	-- Initialize NPCManager for AI behavior
-	local npcManager = NPCManagerModule.new({
+	npcManager = NPCManagerModule.new({
 		DEBUG_AI = true,
 		UPDATE_FREQUENCY = 10,
 	})
 
-	-- Export managers globally for other scripts to access
-	_G.StructureManager = structureManager
-	_G.NPCManager = npcManager
-
 	-- Give WorldState access to StructureManager for registering placed structures
 	worldState:SetStructureManager(structureManager)
+	worldState:SetNPCManager(npcManager)
+	structureManager:SetWorldState(worldState)
+	structureManager:SetNPCManager(npcManager)
 
 	worldState:InitializeCellStates(gridCells, worldFolder)  -- Add worldFolder parameter
 	worldState:StartUpdateLoop(gridCells, worldFolder)
@@ -227,9 +224,6 @@ local function createGrid(firstPlayerName)
 
 	print("[Integration] WorldState system initialized!")
 
-	-- Store for access by other functions
-	_G.WorldState = worldState
-	_G.GridCells = gridCells
 	-- ========================================
 
 	-- Fire event to all players that grid is ready
