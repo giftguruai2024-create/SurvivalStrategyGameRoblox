@@ -529,6 +529,9 @@ function NPCManager:InitializeTask(instanceId, task)
 	elseif taskType == TaskTypes.RETURN_TO_TOWNHALL then
 		self:InitializeReturnTask(instanceId, task)
 
+	elseif taskType == TaskTypes.WANDER_PATROL then
+		self:InitializeWanderPatrolTask(instanceId, task)
+
 	else
 		warn("[NPCManager] Unknown task type:", taskType)
 		self:CancelTask(instanceId)
@@ -931,6 +934,27 @@ function NPCManager:InitializeReturnTask(instanceId, task)
 		print(string.format("[NPCManager] %s cannot find base, staying idle", instanceId))
 		self:ChangeNPCState(instanceId, NPCStates.IDLE)
 	end
+end
+
+function NPCManager:InitializeWanderPatrolTask(instanceId, task)
+	-- Initialize a wandering patrol task
+	local npcData = self.managedNPCs[instanceId]
+	if not npcData then return end
+
+	-- Generate a random patrol target around the patrol center
+	local angle = math.random() * math.pi * 2
+	local distance = math.random() * npcData.patrolRadius
+	npcData.targetPosition = npcData.patrolCenter + Vector3.new(
+		math.cos(angle) * distance,
+		0,
+		math.sin(angle) * distance
+	)
+
+	-- Clear path to trigger pathfinding
+	npcData.currentPath = nil
+
+	-- Task is already set, state will be handled by wandering update
+	-- Don't change state here, let UpdateWandering handle it
 end
 
 -- ========================================
@@ -1632,30 +1656,25 @@ function NPCManager:DepositResources(instanceId)
 	if not npcData then return false end
 
 	local worldState = _G.WorldState
-	if not worldState then 
+	if not worldState then
 		warn("[NPCManager] WorldState not available for resource deposit")
 		return false
 	end
 
-	-- Calculate total resources carried (placeholder - you'll implement inventory system)
-	local resourcesCarried = {
-		Wood = math.random(5, 15), -- Placeholder amounts
-		Stone = math.random(3, 10),
-		Food = math.random(2, 8),
-		Gold = math.random(1, 5)
-	}
-
 	local totalDeposited = 0
 
-	-- Deposit each resource type
-	for resourceType, amount in pairs(resourcesCarried) do
+	-- Deposit each resource type from actual carried resources
+	for resourceType, amount in pairs(npcData.carriedResources) do
 		if amount > 0 then
 			local deposited, newTotal = worldState:DepositResource(resourceType, amount)
 			totalDeposited = totalDeposited + deposited
 
 			if deposited > 0 then
-				print(string.format("[NPCManager] %s deposited %d %s to Town Hall", 
-					instanceId, deposited, resourceType))
+				print(string.format("[NPCManager] %s deposited %d %s to Town Hall (new total: %d)",
+					instanceId, deposited, resourceType, newTotal))
+
+				-- Update NPC inventory attributes
+				self:UpdateNPCInventoryAttributes(instanceId, resourceType, -deposited)
 			end
 		end
 	end
@@ -1663,6 +1682,10 @@ function NPCManager:DepositResources(instanceId)
 	-- Clear NPC's inventory
 	npcData.totalCarriedWeight = 0
 	npcData.carriedResources = {}
+
+	if totalDeposited > 0 then
+		print(string.format("[NPCManager] %s deposited %d total resources", instanceId, totalDeposited))
+	end
 
 	return totalDeposited > 0
 end
@@ -1971,19 +1994,101 @@ end
 function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 	-- Update harvesting progress for villagers
 	local npcData = self.managedNPCs[instanceId]
-	if not npcData then return end
+	if not npcData or not npcData.currentTask then return end
 
-	-- Simulate harvesting progress
-	npcData.workProgress = npcData.workProgress + (deltaTime * npcData.stats.HarvestSpeed)
+	local task = npcData.currentTask
+	local resourceId = task.data.resourceId
+	local resourceType = task.data.resourceType
 
-	-- Complete after some time (placeholder)
-	if npcData.workProgress >= 3 then -- 3 seconds to harvest
-		print(string.format("[NPCManager] %s completed harvesting task", instanceId))
+	-- Find the resource instance in the world
+	local worldFolder = npcData.instance.Parent
+	if not worldFolder then
+		self:CompleteTask(instanceId, "Failed - World not found")
+		return
+	end
 
-		-- Add resources to inventory (placeholder)
-		npcData.totalCarriedWeight = npcData.totalCarriedWeight + 10
+	local resourcesFolder = worldFolder:FindFirstChild("Resources")
+	if not resourcesFolder then
+		self:CompleteTask(instanceId, "Failed - Resources folder not found")
+		return
+	end
 
-		self:CompleteTask(instanceId, "Harvesting Complete")
+	-- Find the specific resource by ID
+	local resourceInstance = nil
+	for _, resource in pairs(resourcesFolder:GetChildren()) do
+		if resource:GetAttribute("InstanceId") == resourceId then
+			resourceInstance = resource
+			break
+		end
+	end
+
+	if not resourceInstance or not resourceInstance.Parent then
+		-- Resource was deleted or depleted
+		print(string.format("[NPCManager] %s - resource no longer exists", instanceId))
+		self:CompleteTask(instanceId, "Failed - Resource Gone")
+		return
+	end
+
+	-- Check if resource is depleted
+	local currentHarvests = resourceInstance:GetAttribute("CurrentHarvests") or 0
+	local maxHarvests = resourceInstance:GetAttribute("MaxHarvests") or 1
+	if currentHarvests >= maxHarvests then
+		print(string.format("[NPCManager] %s - resource is depleted", instanceId))
+		self:CompleteTask(instanceId, "Failed - Resource Depleted")
+		return
+	end
+
+	-- Get harvest time from resource
+	local harvestTime = resourceInstance:GetAttribute("HarvestTime") or 3
+
+	-- Update harvest progress
+	npcData.workProgress = npcData.workProgress + deltaTime
+
+	-- Complete after harvest time
+	if npcData.workProgress >= harvestTime then
+		-- Calculate harvested amount
+		local harvestMin = resourceInstance:GetAttribute("HarvestAmountMin") or 5
+		local harvestMax = resourceInstance:GetAttribute("HarvestAmountMax") or 10
+		local harvestedAmount = math.random(harvestMin, harvestMax)
+
+		-- Update resource harvests count
+		resourceInstance:SetAttribute("CurrentHarvests", currentHarvests + 1)
+
+		-- Check if resource is now depleted
+		if currentHarvests + 1 >= maxHarvests then
+			-- Destroy or hide the resource (it will respawn later via WorldState)
+			print(string.format("[NPCManager] Resource %s is now depleted (%d/%d harvests)",
+				resourceId, currentHarvests + 1, maxHarvests))
+			resourceInstance:Destroy()
+		end
+
+		-- Add resources to NPC inventory
+		npcData.carriedResources[resourceType] = (npcData.carriedResources[resourceType] or 0) + harvestedAmount
+		npcData.totalCarriedWeight = npcData.totalCarriedWeight + harvestedAmount
+
+		-- Update NPC inventory attributes
+		self:UpdateNPCInventoryAttributes(instanceId, resourceType, harvestedAmount)
+		self:UpdateNPCPerformanceAttributes(instanceId, "ResourceHarvested", harvestedAmount)
+
+		print(string.format("[NPCManager] %s harvested %d %s (carrying: %d/%d)",
+			instanceId, harvestedAmount, resourceType,
+			npcData.totalCarriedWeight, npcData.stats.CarryCapacity))
+
+		-- Notify WorldState that harvest is complete
+		local worldState = _G.WorldState
+		if worldState then
+			worldState:CompleteHarvestTask(resourceId, instanceId, harvestedAmount, resourceType)
+		end
+
+		-- Check if inventory is full
+		if npcData.totalCarriedWeight >= npcData.stats.CarryCapacity then
+			print(string.format("[NPCManager] %s inventory full, returning to town hall", instanceId))
+			self:CompleteTask(instanceId, "Harvesting Complete - Inventory Full")
+			self:ChangeNPCState(instanceId, NPCStates.RETURNING)
+		else
+			-- Completed harvesting, return to idle to get next task
+			self:CompleteTask(instanceId, "Harvesting Complete")
+		end
 	end
 end
 
@@ -1993,24 +2098,6 @@ function NPCManager:OnNPCDeath(instanceId)
 
 	-- Clean up and remove from management
 	self:UnregisterNPC(instanceId, "Death")
-end
-
-function NPCManager:GeneratePatrolPoints(center, radius)
-	-- Generate patrol points around a center position
-	local points = {}
-	local numPoints = 4
-
-	for i = 1, numPoints do
-		local angle = (i / numPoints) * math.pi * 2
-		local offset = Vector3.new(
-			math.cos(angle) * radius,
-			0,
-			math.sin(angle) * radius
-		)
-		table.insert(points, center + offset)
-	end
-
-	return points
 end
 
 function NPCManager:FindNearestBlueprint(instanceId)
@@ -2036,57 +2123,6 @@ function NPCManager:FindSafePosition(instanceId)
 	-- TODO: Implement safe position calculation
 	local npcData = self.managedNPCs[instanceId]
 	return npcData and npcData.lastPosition or Vector3.new(0, 0, 0)
-end
-
-function NPCManager:FindNearestDepositLocation(instanceId)
-	-- Find nearest location to deposit resources
-	-- TODO: Implement deposit location detection
-	return nil
-end
-
-function NPCManager:FindNearestBase(instanceId)
-	-- Find the nearest base structure (TownHall) for returning
-	local npcData = self.managedNPCs[instanceId]
-	if not npcData or not npcData.instance or not npcData.instance.PrimaryPart then
-		return nil
-	end
-
-	local npcPosition = npcData.instance.PrimaryPart.Position
-	local npcTeam = npcData.stats.Team
-
-	-- Look for TownHall or other base structures in the same world
-	local worldFolder = npcData.instance.Parent
-	if not worldFolder then
-		return nil
-	end
-
-	local nearestBase = nil
-	local nearestDistance = math.huge
-
-	-- Search for structures that could be bases
-	for _, obj in pairs(worldFolder:GetChildren()) do
-		if obj:IsA("Model") and obj:GetAttribute("StructureType") then
-			local structureTeam = obj:GetAttribute("Team")
-			local structureType = obj:GetAttribute("StructureType")
-
-			-- Look for team structures that are bases (TownHall, etc.)
-			if structureTeam == npcTeam and (structureType == "Main" or structureType == "TOWNHALL") then
-				if obj.PrimaryPart then
-					local distance = (npcPosition - obj.PrimaryPart.Position).Magnitude
-					if distance < nearestDistance then
-						nearestDistance = distance
-						nearestBase = {
-							id = obj:GetAttribute("InstanceId") or obj.Name,
-							position = obj.PrimaryPart.Position,
-							instance = obj
-						}
-					end
-				end
-			end
-		end
-	end
-
-	return nearestBase
 end
 
 -- ========================================
