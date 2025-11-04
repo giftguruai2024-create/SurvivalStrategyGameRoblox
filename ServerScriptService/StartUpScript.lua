@@ -4,19 +4,35 @@
 
 local Players = game:GetService("Players")
 local replicated = game:GetService('ReplicatedStorage')
-local events = replicated:WaitForChild('Events')
-local remote = events:WaitForChild('Clicked')
 
--- ========================================
--- WORLDSTATE INTEGRATION
--- ========================================
+-- Module requires - THIS WAS MISSING!
 local WorldStateModule = require(replicated:WaitForChild("WorldStateScript"))
-local worldState = nil -- Will be initialized when grid is created
+local StructureManagerModule = require(replicated:WaitForChild("StructureManager"))
+local NPCManagerModule = require(replicated:WaitForChild("NPCManager"))
 
--- Create RemoteEvent for camera initialization
+local events = replicated:WaitForChild('Events')
+local ClickedRemote = Instance.new("RemoteEvent")
+ClickedRemote.Name = "Clicked"
+ClickedRemote.Parent = events
+
+-- Resource selection remote events
+local selectResourceRemote = Instance.new("RemoteEvent")
+selectResourceRemote.Name = "SelectResource"
+selectResourceRemote.Parent = events
+
+local createHarvestTaskRemote = Instance.new("RemoteEvent")
+createHarvestTaskRemote.Name = "CreateHarvestTask"
+createHarvestTaskRemote.Parent = events
+
 local cameraReadyEvent = Instance.new("RemoteEvent")
 cameraReadyEvent.Name = "GridReady"
 cameraReadyEvent.Parent = events
+-- ========================================
+-- WORLDSTATE INTEGRATION
+-- ========================================
+
+-- Declare worldState variable at the top level
+local worldState
 
 -- ========================================
 -- CONFIGURATION - Adjust these values!
@@ -138,7 +154,24 @@ local function createGrid(firstPlayerName)
 	-- ========================================
 	print("[Integration] Initializing WorldState system...")
 	worldState = WorldStateModule.new()
-	worldState:InitializeCellStates(gridCells)
+
+	-- Initialize StructureManager and connect it to WorldState
+	local structureManager = StructureManagerModule.new()
+
+	-- Initialize NPCManager for AI behavior
+	local npcManager = NPCManagerModule.new({
+		DEBUG_AI = true,
+		UPDATE_FREQUENCY = 10,
+	})
+
+	-- Export managers globally for other scripts to access
+	_G.StructureManager = structureManager
+	_G.NPCManager = npcManager
+
+	-- Give WorldState access to StructureManager for registering placed structures
+	worldState:SetStructureManager(structureManager)
+
+	worldState:InitializeCellStates(gridCells, worldFolder)  -- Add worldFolder parameter
 	worldState:StartUpdateLoop(gridCells, worldFolder)
 
 	-- Optional: Customize WorldState config
@@ -150,6 +183,10 @@ local function createGrid(firstPlayerName)
 	})
 
 	print("[Integration] WorldState system initialized!")
+
+	-- Store for access by other functions
+	_G.WorldState = worldState
+	_G.GridCells = gridCells
 	-- ========================================
 
 	-- Fire event to all players that grid is ready
@@ -377,18 +414,59 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- Connect to the OnServerEvent and increment OOFs
-remote.OnServerEvent:Connect(function(player)
-	print(player)
-	print("Player who clicked:", player.Name)
-	-- Get or create the OOFs stat
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if leaderstats then
-		local oofs = leaderstats:FindFirstChild("OOFs")
-		if oofs then
-			oofs.Value = oofs.Value + 1
-			print("OOFs count:", oofs.Value)
+ClickedRemote.OnServerEvent:Connect(function(player,event,data)
+
+end)
+
+-- Handle resource selection
+selectResourceRemote.OnServerEvent:Connect(function(player, action, resourceId, resourceType, position)
+	if not worldState then
+		warn("[Integration] WorldState not available for resource selection")
+		return
+	end
+
+	if action == "select" then
+		local success = worldState:SelectResource(resourceId, resourceType, position, player.Name)
+		selectResourceRemote:FireClient(player, "select_result", resourceId, success)
+	elseif action == "unselect" then
+		local success = worldState:UnselectResource(resourceId)
+		selectResourceRemote:FireClient(player, "unselect_result", resourceId, success)
+	end
+end)
+
+-- Handle harvest task creation
+createHarvestTaskRemote.OnServerEvent:Connect(function(player, taskList)
+	if not worldState then
+		warn("[Integration] WorldState not available for task creation")
+		createHarvestTaskRemote:FireClient(player, false, "WorldState not available")
+		return
+	end
+
+	if not taskList or #taskList == 0 then
+		createHarvestTaskRemote:FireClient(player, false, "No tasks provided")
+		return
+	end
+
+	local tasksCreated = 0
+
+	-- Process each task in the list
+	for _, taskData in ipairs(taskList) do
+		local success = worldState:SelectResource(
+			taskData.resourceId, 
+			taskData.resourceType, 
+			taskData.position, 
+			player.Name
+		)
+
+		if success then
+			tasksCreated = tasksCreated + 1
 		end
 	end
+
+	createHarvestTaskRemote:FireClient(player, true, 
+		string.format("Created %d harvest tasks", tasksCreated))
+
+	print(string.format("[Integration] %s created %d harvest tasks", player.Name, tasksCreated))
 end)
 
 -- ========================================
