@@ -459,18 +459,13 @@ function WorldState:GetNearbyAvailableCells(centerX, centerZ, radius, maxResults
 	return availableCells
 end
 
-function WorldState:CanDepositResource(resourceType, amount)
-	-- Check if resources can be deposited
-	if not self.townHallStorage then
-		self:InitializeTownHallStorage()
-	end
+-- ========================================
+-- RESOURCE SELECTION SYSTEM - FIXED WITH MISSING METHOD
+-- ========================================
 
-	local storage = self.townHallStorage
-	local maxKey = "Max" .. resourceType
-	local currentAmount = storage[resourceType] or 0
-	local maxAmount = storage[maxKey] or 50
-
-	return (currentAmount + amount) <= maxAmount
+function WorldState:IsResourceSelected(resourceInstanceId)
+	-- Check if a resource is already selected for harvesting
+	return self.selectedResources[resourceInstanceId] ~= nil
 end
 
 function WorldState:SelectResource(resourceInstanceId, resourceType, position, playerName)
