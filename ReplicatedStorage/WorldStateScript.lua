@@ -1,4 +1,5 @@
 -- @ScriptType: ModuleScript
+-- @ScriptType: ModuleScript
 -- WorldStateScript Module
 -- Place this in ReplicatedStorage or ServerStorage
 -- Manages world time, grid cell states, and resource spawning
@@ -664,6 +665,42 @@ function WorldState:GetStructureModel(structureType) -- NEW
 	return structureModels[structureType]
 end
 
+function WorldState:GetOrCreateResourceFolder(worldFolder)
+	-- Get or create the Resource folder in the world
+	if not worldFolder then
+		return nil
+	end
+
+	local resourceFolder = worldFolder:FindFirstChild("Resources")
+
+	if not resourceFolder then
+		resourceFolder = Instance.new("Folder")
+		resourceFolder.Name = "Resources"
+		resourceFolder.Parent = worldFolder
+		print("[WorldState] Created Resources folder in world")
+	end
+
+	return resourceFolder
+end
+
+function WorldState:GetOrCreateStructureFolder(worldFolder, team)
+	-- Get or create the appropriate structure folder based on team
+	if not worldFolder then
+		return nil
+	end
+
+	local folderName = team == "Player" and "PlayerStructures" or "EnemyStructures"
+	local folder = worldFolder:FindFirstChild(folderName)
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = folderName
+		folder.Parent = worldFolder
+		print(string.format("[WorldState] Created %s folder", folderName))
+	end
+
+	return folder
+end
 
 -- ========================================
 -- GRID CELL STATE MANAGEMENT (Updated)
@@ -794,6 +831,9 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 	local grassStartZ = CONFIG.GRID.BEACH_THICKNESS + 1
 	local grassEndZ = CONFIG.GRID.BEACH_THICKNESS + CONFIG.GRID.GRID_SIZE
 
+	-- Get or create the PlayerStructures folder for placing TownHall
+	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, "Player")
+
 	local placementOptions = {
 		name = structureConfig.name .. "_Initial",
 		structureType = structureType,
@@ -814,12 +854,12 @@ function WorldState:PlaceTownHall(gridCells, worldFolder)
 		}
 	}
 
-	-- Use PlacementModule to place the TownHall at center
+	-- Use PlacementModule to place the TownHall at center - using structureFolder instead of worldFolder
 	local townHallInstance, blockedCells, placedX, placedZ = self.placementModule:PlaceAtCenter(
 		townHallModel, 
 		self.cellStates, 
 		gridCells, 
-		worldFolder, 
+		structureFolder, -- Use proper structure folder instead of worldFolder
 		placementOptions
 	)
 
@@ -900,6 +940,10 @@ function WorldState:PlaceStructureAt(structureType, gridX, gridZ, gridCells, wor
 		return nil
 	end
 
+	-- Get proper structure folder based on options
+	local team = options and options.team or "Player"
+	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, team)
+
 	-- Merge default options with provided options
 	local placementOptions = options or {}
 	placementOptions.name = placementOptions.name or (structureConfig.name .. "_" .. gridX .. "_" .. gridZ)
@@ -908,13 +952,13 @@ function WorldState:PlaceStructureAt(structureType, gridX, gridZ, gridCells, wor
 	placementOptions.attributes.StructureType = structureType
 	placementOptions.attributes.Health = structureConfig.health
 
-	-- Place structure at specific location
+	-- Place structure at specific location using proper folder
 	local structureInstance = self.placementModule:PlaceStructure(
 		structureModel, 
 		gridCells, 
 		gridX, 
 		gridZ, 
-		worldFolder, 
+		structureFolder, -- Use proper structure folder
 		placementOptions
 	)
 
@@ -958,6 +1002,10 @@ function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCell
 		return nil
 	end
 
+	-- Get proper structure folder based on options
+	local team = options and options.team or "Player"
+	local structureFolder = self:GetOrCreateStructureFolder(worldFolder, team)
+
 	-- Merge default options with provided options
 	local placementOptions = options or {}
 	placementOptions.structureType = structureType
@@ -965,14 +1013,14 @@ function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCell
 	placementOptions.attributes.StructureType = structureType
 	placementOptions.attributes.Health = structureConfig.health
 
-	-- Place structure near target location
+	-- Place structure near target location using proper folder
 	local structureInstance, blockedCells, placedX, placedZ = self.placementModule:PlaceNearLocation(
 		structureModel, 
 		self.cellStates, 
 		gridCells, 
 		targetX, 
 		targetZ, 
-		worldFolder, 
+		structureFolder, -- Use proper structure folder
 		placementOptions
 	)
 
@@ -999,7 +1047,7 @@ function WorldState:PlaceStructureNear(structureType, targetX, targetZ, gridCell
 end
 
 -- ========================================
--- RESOURCE SPAWNING SYSTEM (Unchanged)
+-- RESOURCE SPAWNING SYSTEM (Updated to use Resources folder)
 -- ========================================
 
 function WorldState:CanSpawnResource(resourceType, x, z)
@@ -1114,8 +1162,16 @@ function WorldState:SpawnResource(resourceType, x, z, gridCells, worldFolder)
 		newResource:SetAttribute("Description", resourceInstance.Description)
 	end
 
-	-- Parent to world
-	newResource.Parent = worldFolder
+	-- Get or create the Resources folder and parent to it
+	local resourceFolder = self:GetOrCreateResourceFolder(worldFolder)
+	if resourceFolder then
+		newResource.Parent = resourceFolder
+		print(string.format("[WorldState] Spawned resource in Resources folder"))
+	else
+		-- Fallback to world folder if Resources folder creation failed
+		newResource.Parent = worldFolder
+		warn("[WorldState] Could not create/find Resources folder, spawning in world folder")
+	end
 
 	-- Update cell state
 	if self.cellStates[x] and self.cellStates[x][z] then
