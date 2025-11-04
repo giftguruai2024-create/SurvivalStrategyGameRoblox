@@ -22,7 +22,7 @@ local DEFAULT_CONFIG = {
 	PATHFINDING_ENABLED = true,
 	MAX_PATHFINDING_DISTANCE = 500,
 	STUCK_THRESHOLD = 3, -- Seconds before considering NPC stuck
-	TASK_TIMEOUT = 30, -- Seconds before abandoning a task
+	TASK_TIMEOUT = 60, -- Seconds before abandoning a task
 	COMBAT_RANGE_MULTIPLIER = 1.2, -- How much farther to detect enemies than attack range
 }
 
@@ -1083,6 +1083,15 @@ function NPCManager:UpdateMovement(instanceId, deltaTime)
 	end
 
 	local distance = (npcData.lastPosition - npcData.targetPosition).Magnitude
+
+	-- For harvest tasks, check if within harvest range (don't need to reach exact position)
+	if npcData.currentTask and npcData.currentTask.type == TaskTypes.HARVEST_RESOURCE then
+		if distance <= npcData.stats.HarvestRange then
+			-- Within harvest range, start working immediately
+			self:ChangeNPCState(instanceId, NPCStates.WORKING)
+			return
+		end
+	end
 
 	-- Check if reached destination
 	if distance < 3 then -- Within 3 studs of target
