@@ -1,5 +1,6 @@
 -- @ScriptType: ModuleScript
 -- @ScriptType: ModuleScript
+-- @ScriptType: ModuleScript
 -- WorldStateScript Module
 -- Place this in ReplicatedStorage or ServerStorage
 -- Manages world time, grid cell states, and resource spawning
@@ -45,7 +46,7 @@ local CONFIG = {
 		START_TIME = 6, -- Starting hour (0-24)
 		TIME_SCALE = 1, -- Multiplier for time speed (1 = normal)
 	},
-
+	DEBUG_AI = true,
 	-- Resource spawning configuration
 	RESOURCES = {
 		-- Each resource type with its properties
@@ -128,6 +129,9 @@ local CONFIG = {
 function WorldState.new()
 	local self = setmetatable({}, WorldState)
 
+	-- expose config on instance so methods can use self.config
+	self.config = CONFIG
+
 	-- Time tracking
 	self.startTick = tick()
 	self.elapsedTime = 0
@@ -166,6 +170,7 @@ function WorldState.new()
 	print("[WorldState] Initialized")
 	return self
 end
+
 
 function WorldState:SetStructureManager(structureManager)
 	-- Set reference to StructureManager for registering placed structures
@@ -734,19 +739,6 @@ function WorldState:InitializeCellStates(gridCells, worldFolder) -- Added worldF
 	self:PlaceTownHall(gridCells, worldFolder)
 end
 
-function WorldState:GetCellState(x, z)
-	if self.cellStates[x] and self.cellStates[x][z] then
-		return self.cellStates[x][z]
-	end
-	return nil
-end
-
-function WorldState:SetCellOccupied(x, z, occupied)
-	if self.cellStates[x] and self.cellStates[x][z] then
-		self.cellStates[x][z].occupied = occupied
-		self.cellStates[x][z].lastUpdate = tick()
-	end
-end
 
 function WorldState:SetCellBlocked(x, z, blocked, structureType) -- MODIFIED to accept structureType
 	if self.cellStates[x] and self.cellStates[x][z] then
@@ -754,28 +746,6 @@ function WorldState:SetCellBlocked(x, z, blocked, structureType) -- MODIFIED to 
 		-- Store the structure type if blocking, otherwise nil
 		self.cellStates[x][z].structureType = blocked and structureType or nil 
 	end
-end
-
-function WorldState:IsCellAvailableForSpawn(x, z)
-	local state = self:GetCellState(x, z)
-	if not state then return false end
-
-	-- Check if cell is in grass area (not beach)
-	local grassStartX = CONFIG.GRID.BEACH_THICKNESS + 1
-	local grassEndX = CONFIG.GRID.BEACH_THICKNESS + CONFIG.GRID.GRID_SIZE
-	local grassStartZ = CONFIG.GRID.BEACH_THICKNESS + 1
-	local grassEndZ = CONFIG.GRID.BEACH_THICKNESS + CONFIG.GRID.GRID_SIZE
-
-	if x < grassStartX or x > grassEndX or z < grassStartZ or z > grassEndZ then
-		return false
-	end
-
-	-- Check if cell is occupied, blocked (by structure), or has too many resources
-	if state.occupied or state.blocked then
-		return false
-	end
-
-	return true
 end
 
 -- ========================================
@@ -1409,8 +1379,14 @@ function WorldState:SetConfig(newConfig)
 			for subKey, subValue in pairs(value) do
 				CONFIG[key][subKey] = subValue
 			end
+		else
+			-- add new top-level key if missing
+			CONFIG[key] = value
 		end
 	end
+
+	-- keep instance pointer up-to-date
+	self.config = CONFIG
 end
 
 return WorldState
