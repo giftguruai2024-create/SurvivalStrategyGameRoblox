@@ -1,4 +1,5 @@
 -- @ScriptType: LocalScript
+-- @ScriptType: LocalScript
 -- LocalMenuHandler - Cleaned and Optimized Version
 -- Place this LocalScript inside StarterGui
 
@@ -588,18 +589,27 @@ end
 local function handleBuildingMenuToggle()
 	local ti = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	local menuTi = TweenInfo.new(MENU_TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
+	local BUILDING_BUTTON_OPEN_POS = buildingMenuButtonOriginalPosition + UDim2.new(.29,0,0,0)
 	if isBuildingHovering then
 		-- HAMMER DOWN + OPEN MENU
 		print("\n🔨 BUILDING MENU - HAMMER DOWN! Opening menu")
 		isBuildingHovering = false
 		isBuildingMenuOpen = true
 
+
 		-- Tween menu position to OPEN
 		if buildingMenu then
 			TweenService:Create(buildingMenu, menuTi, {
 				Position = BUILDING_MENU_OPEN_POS
 			}):Play()
+		end
+		
+		-- Move the building button to the right of the menu
+		if buildingMenuButton then
+			TweenService:Create(buildingMenuButton, menuTi, {
+				Position = BUILDING_BUTTON_OPEN_POS
+			}):Play()
+			selectionMenuButton.Visible = false
 		end
 
 		local targetOrientation = CFrame.Angles(math.rad(0), math.rad(90), math.rad(90))
@@ -608,6 +618,8 @@ local function handleBuildingMenuToggle()
 		-- LIFT UP + CLOSE MENU
 		print("\n⬆️ BUILDING MENU - LIFTING UP! Closing menu")
 		isBuildingMenuOpen = false
+
+		-- Show the selection menu button again
 
 		-- Tween menu position to CLOSED
 		if buildingMenu then
@@ -621,12 +633,17 @@ local function handleBuildingMenuToggle()
 			TweenService:Create(buildingMenuButton, menuTi, {
 				Position = buildingMenuButtonOriginalPosition
 			}):Play()
+			selectionMenuButton.Visible = true
 		end
 
 		animateButtonObjects(buildingMenuButton, buildingOriginalData, ti, nil, nil, true)
 
 		task.delay(0.3, function()
 			isBuildingHovering = true
+			-- Re-enable selection button hovering only after it's visible again
+			if not isSelectionSelected then
+				isSelectionHovering = true
+			end
 		end)
 	end
 
@@ -634,6 +651,12 @@ local function handleBuildingMenuToggle()
 end
 
 local function handleSelectionMenuToggle()
+	-- Don't allow toggle if building menu is open
+	if isBuildingMenuOpen then
+		print("⚠️ Cannot toggle selection menu while building menu is open")
+		return
+	end
+
 	local ti = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 	if not isSelectionSelected then
