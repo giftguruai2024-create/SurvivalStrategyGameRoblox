@@ -1992,7 +1992,7 @@ function NPCManager:UpdateBuilding(instanceId, deltaTime)
 end
 
 function NPCManager:UpdateHarvesting(instanceId, deltaTime)
-	-- Update harvesting progress for villagers
+	-- Update harvesting progress for villagers (with gradual damage and shrinking)
 	local npcData = self.managedNPCs[instanceId]
 	if not npcData or not npcData.currentTask then return end
 
@@ -2016,7 +2016,7 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 	-- Find the specific resource by ID
 	local resourceInstance = nil
 	for _, resource in pairs(resourcesFolder:GetChildren()) do
-		if resource:GetAttribute("InstanceId") == resourceId then
+		if resource:GetAttribute("ResourceId") == resourceId then
 			resourceInstance = resource
 			break
 		end
@@ -2029,38 +2029,76 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 		return
 	end
 
-	-- Check if resource is depleted
-	local currentHarvests = resourceInstance:GetAttribute("CurrentHarvests") or 0
-	local maxHarvests = resourceInstance:GetAttribute("MaxHarvests") or 1
-	if currentHarvests >= maxHarvests then
-		print(string.format("[NPCManager] %s - resource is depleted", instanceId))
+	-- Get health values
+	local maxHealth = resourceInstance:GetAttribute("MaxHealth") or 100
+	local currentHealth = resourceInstance:GetAttribute("CurrentHealth") or maxHealth
+
+	-- Check if resource is already depleted
+	if currentHealth <= 0 then
+		print(string.format("[NPCManager] %s - resource is already depleted", instanceId))
 		self:CompleteTask(instanceId, "Failed - Resource Depleted")
 		return
 	end
 
-	-- Get harvest time from resource
+	-- Get harvest parameters
 	local harvestTime = resourceInstance:GetAttribute("HarvestTime") or 3
+	local harvestMin = resourceInstance:GetAttribute("HarvestAmountMin") or 5
+	local harvestMax = resourceInstance:GetAttribute("HarvestAmountMax") or 10
 
-	-- Update harvest progress
+	-- Calculate damage per second (total health / harvest time)
+	local damagePerSecond = maxHealth / harvestTime
+	local damageThisUpdate = damagePerSecond * deltaTime
+
+	-- Deal damage to resource
+	currentHealth = math.max(0, currentHealth - damageThisUpdate)
+	resourceInstance:SetAttribute("CurrentHealth", currentHealth)
+
+	-- Calculate health percentage for shrinking effect
+	local healthPercent = currentHealth / maxHealth
+
+	-- Shrink the resource based on remaining health
+	if resourceInstance.PrimaryPart then
+		local originalX = resourceInstance:GetAttribute("OriginalScaleX") or resourceInstance.PrimaryPart.Size.X
+		local originalY = resourceInstance:GetAttribute("OriginalScaleY") or resourceInstance.PrimaryPart.Size.Y
+		local originalZ = resourceInstance:GetAttribute("OriginalScaleZ") or resourceInstance.PrimaryPart.Size.Z
+
+		-- Calculate new scale (minimum 10% of original size)
+		local scaleMultiplier = math.max(0.1, healthPercent)
+		local newScale = Vector3.new(
+			originalX * scaleMultiplier,
+			originalY * scaleMultiplier,
+			originalZ * scaleMultiplier
+		)
+
+		-- Get current position to maintain it while scaling
+		local currentPosition = resourceInstance.PrimaryPart.Position
+
+		-- Apply new scale to all parts in the model
+		for _, part in pairs(resourceInstance:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local relativeScale = part.Size / resourceInstance.PrimaryPart.Size
+				part.Size = Vector3.new(
+					newScale.X * relativeScale.X,
+					newScale.Y * relativeScale.Y,
+					newScale.Z * relativeScale.Z
+				)
+			end
+		end
+
+		-- Restore position (scaling can sometimes shift position)
+		resourceInstance.PrimaryPart.Position = currentPosition
+	end
+
+	-- Update work progress for tracking
 	npcData.workProgress = npcData.workProgress + deltaTime
 
-	-- Complete after harvest time
-	if npcData.workProgress >= harvestTime then
-		-- Calculate harvested amount
-		local harvestMin = resourceInstance:GetAttribute("HarvestAmountMin") or 5
-		local harvestMax = resourceInstance:GetAttribute("HarvestAmountMax") or 10
+	-- Check if resource is fully harvested (health reached 0)
+	if currentHealth <= 0 then
+		-- Calculate harvested amount based on how much the NPC has been harvesting
 		local harvestedAmount = math.random(harvestMin, harvestMax)
 
-		-- Update resource harvests count
-		resourceInstance:SetAttribute("CurrentHarvests", currentHarvests + 1)
-
-		-- Check if resource is now depleted
-		if currentHarvests + 1 >= maxHarvests then
-			-- Destroy or hide the resource (it will respawn later via WorldState)
-			print(string.format("[NPCManager] Resource %s is now depleted (%d/%d harvests)",
-				resourceId, currentHarvests + 1, maxHarvests))
-			resourceInstance:Destroy()
-		end
+		print(string.format("[NPCManager] %s harvested %d %s - resource depleted!",
+			instanceId, harvestedAmount, resourceType))
 
 		-- Add resources to NPC inventory
 		npcData.carriedResources[resourceType] = (npcData.carriedResources[resourceType] or 0) + harvestedAmount
@@ -2070,9 +2108,11 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 		self:UpdateNPCInventoryAttributes(instanceId, resourceType, harvestedAmount)
 		self:UpdateNPCPerformanceAttributes(instanceId, "ResourceHarvested", harvestedAmount)
 
-		print(string.format("[NPCManager] %s harvested %d %s (carrying: %d/%d)",
-			instanceId, harvestedAmount, resourceType,
-			npcData.totalCarriedWeight, npcData.stats.CarryCapacity))
+		print(string.format("[NPCManager] %s now carrying: %d/%d",
+			instanceId, npcData.totalCarriedWeight, npcData.stats.CarryCapacity))
+
+		-- Destroy the depleted resource
+		resourceInstance:Destroy()
 
 		-- Notify WorldState that harvest is complete
 		local worldState = _G.WorldState
@@ -2088,6 +2128,13 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 		else
 			-- Completed harvesting, return to idle to get next task
 			self:CompleteTask(instanceId, "Harvesting Complete")
+		end
+	else
+		-- Still harvesting, stay in WORKING state
+		-- Log progress occasionally for debugging
+		if self.config.DEBUG_AI and math.random() < 0.1 then
+			print(string.format("[NPCManager] %s harvesting: %.1f%% complete (health: %.1f/%.1f)",
+				instanceId, (1 - healthPercent) * 100, currentHealth, maxHealth))
 		end
 	end
 end

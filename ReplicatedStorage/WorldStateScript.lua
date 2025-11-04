@@ -1126,6 +1126,12 @@ function WorldState:SpawnResource(resourceType, x, z, gridCells, worldFolder)
 		return false
 	end
 
+	-- Calculate health based on MaxHarvests (each harvest = 100 health)
+	local maxHealth = resourceInstance.MaxHarvests * 100
+
+	-- Store original scale for shrinking effect
+	local originalScale = newResource.PrimaryPart.Size
+
 	-- Set comprehensive attributes from AllStats
 	newResource:SetAttribute("ResourceType", resourceInstance.Type)
 	newResource:SetAttribute("ResourceId", resourceInstance.ResourceId)
@@ -1145,6 +1151,13 @@ function WorldState:SpawnResource(resourceType, x, z, gridCells, worldFolder)
 	newResource:SetAttribute("GridX", x)
 	newResource:SetAttribute("GridZ", z)
 	newResource:SetAttribute("IsSelected", false) -- For selection system
+
+	-- Health system attributes
+	newResource:SetAttribute("MaxHealth", maxHealth)
+	newResource:SetAttribute("CurrentHealth", maxHealth)
+	newResource:SetAttribute("OriginalScaleX", originalScale.X)
+	newResource:SetAttribute("OriginalScaleY", originalScale.Y)
+	newResource:SetAttribute("OriginalScaleZ", originalScale.Z)
 
 	-- Optional attributes
 	if resourceInstance.HarvestSound then
