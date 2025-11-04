@@ -1,4 +1,5 @@
 -- @ScriptType: ModuleScript
+-- @ScriptType: ModuleScript
 -- NPCManager Module
 -- Handles all NPC AI behaviors, task management, pathfinding, and state control
 -- Place this in ReplicatedStorage
