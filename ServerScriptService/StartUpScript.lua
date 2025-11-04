@@ -1,5 +1,6 @@
 -- @ScriptType: Script
 -- @ScriptType: Script
+-- @ScriptType: Script
 -- Server-side script for grid generation and player management
 -- Place this in ServerScriptService
 
