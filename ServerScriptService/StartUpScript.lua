@@ -1,4 +1,5 @@
 -- @ScriptType: Script
+-- @ScriptType: Script
 -- Server-side script for grid generation and player management
 -- Place this in ServerScriptService
 
@@ -62,6 +63,49 @@ local lightGreen = Color3.fromRGB(124, 252, 0)
 local sandColor1 = Color3.fromRGB(194, 178, 128) -- Light sand
 local sandColor2 = Color3.fromRGB(168, 153, 110) -- Darker sand
 
+-- Function to create organized world folder structure
+local function createWorldFolderStructure(worldFolder)
+	print("[StartUpScript] Creating organized world folder structure...")
+
+	-- Create main grid folder
+	local gridFolder = Instance.new("Folder")
+	gridFolder.Name = "Grid_Cells"
+	gridFolder.Parent = worldFolder
+
+	-- Create player object folders
+	local playerNPCsFolder = Instance.new("Folder")
+	playerNPCsFolder.Name = "PlayerNPCs"
+	playerNPCsFolder.Parent = worldFolder
+
+	local playerStructuresFolder = Instance.new("Folder")
+	playerStructuresFolder.Name = "PlayerStructures"
+	playerStructuresFolder.Parent = worldFolder
+
+	-- Create enemy object folders
+	local enemyNPCsFolder = Instance.new("Folder")
+	enemyNPCsFolder.Name = "EnemyNPCs"
+	enemyNPCsFolder.Parent = worldFolder
+
+	local enemyStructuresFolder = Instance.new("Folder")
+	enemyStructuresFolder.Name = "EnemyStructures"
+	enemyStructuresFolder.Parent = worldFolder
+
+	-- Create resources folder
+	local resourcesFolder = Instance.new("Folder")
+	resourcesFolder.Name = "Resources"
+	resourcesFolder.Parent = worldFolder
+
+	print("[StartUpScript] ✅ Created organized folder structure:")
+	print("  - Grid_Cells (for terrain)")
+	print("  - PlayerNPCs (for player units)")
+	print("  - PlayerStructures (for player buildings)")
+	print("  - EnemyNPCs (for enemy units)")
+	print("  - EnemyStructures (for enemy buildings)")
+	print("  - Resources (for harvestable resources)")
+
+	return gridFolder
+end
+
 -- Function to create the grid
 local function createGrid(firstPlayerName)
 	-- Create the world folder for the first player
@@ -69,10 +113,8 @@ local function createGrid(firstPlayerName)
 	worldFolder.Name = firstPlayerName .. "_World"
 	worldFolder.Parent = workspace
 
-	-- Create a folder to organize the grid inside the world folder
-	local gridFolder = Instance.new("Folder")
-	gridFolder.Name = "Grid_Cells"
-	gridFolder.Parent = worldFolder
+	-- Create organized folder structure
+	local gridFolder = createWorldFolderStructure(worldFolder)
 
 	print("Starting grid generation...")
 
@@ -133,7 +175,7 @@ local function createGrid(firstPlayerName)
 			cell.Anchored = true
 			cell.CanCollide = true
 
-			-- Parent to folder
+			-- Parent to grid folder (organized structure)
 			cell.Parent = gridFolder
 
 			-- Store reference in the table
