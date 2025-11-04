@@ -692,7 +692,11 @@ function NPCManager:FindTownHallPosition(instanceId)
 	local npcData = self.managedNPCs[instanceId]
 	if not npcData then return nil end
 
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are parented to PlayerNPCs/EnemyNPCs folder, so we need to go up one more level to get the actual world folder
+	local npcFolder = npcData.instance.Parent
+	if not npcFolder then return nil end
+
+	local worldFolder = npcFolder.Parent
 	if not worldFolder then return nil end
 
 	-- Look for town hall
@@ -1738,7 +1742,13 @@ function NPCManager:FindNearestBase(instanceId)
 	local npcTeam = npcData.stats.Team
 
 	-- Look for TownHall or other base structures in the same world
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are parented to PlayerNPCs/EnemyNPCs folder, so we need to go up one more level to get the actual world folder
+	local npcFolder = npcData.instance.Parent
+	if not npcFolder then
+		return nil
+	end
+
+	local worldFolder = npcFolder.Parent
 	if not worldFolder then
 		return nil
 	end
@@ -2002,7 +2012,14 @@ function NPCManager:UpdateHarvesting(instanceId, deltaTime)
 	local resourceType = task.data.resourceType
 
 	-- Find the resource instance in the world
-	local worldFolder = npcData.instance.Parent
+	-- NPCs are parented to PlayerNPCs/EnemyNPCs folder, so we need to go up one more level to get the actual world folder
+	local npcFolder = npcData.instance.Parent
+	if not npcFolder then
+		self:CompleteTask(instanceId, "Failed - NPC folder not found")
+		return
+	end
+
+	local worldFolder = npcFolder.Parent
 	if not worldFolder then
 		self:CompleteTask(instanceId, "Failed - World not found")
 		return
