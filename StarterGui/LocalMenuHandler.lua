@@ -195,7 +195,7 @@ end
 local function clearAllResourceSelections()
 	-- Clear all selected resources and notify server
 	for resourceId, _ in pairs(selectedResources) do
-		selectResourceRemote:FireServer("unselect", resourceId)
+		createHarvestTaskRemote:FireServer("remove", resourceId)
 	end
 
 	selectedResources = {}
@@ -296,24 +296,21 @@ local function onMouseClickResource()
 			-- Check if already selected
 			if selectedResources[resourceId] then
 				-- Unselect and remove from tasks
-				selectResourceRemote:FireServer("unselect", resourceId)
 				createHarvestTaskRemote:FireServer("remove", resourceId)
 				selectedResources[resourceId] = nil
 				print("❌ Unselected and removed task for", resourceType, "resource")
 			else
-				-- Select and auto-queue task
+				-- Select and auto-queue task with single remote call
 				local position = resourceModel.PrimaryPart and resourceModel.PrimaryPart.Position or Vector3.new(0, 0, 0)
 
-				-- Select the resource visually
-				selectResourceRemote:FireServer("select", resourceId, resourceType, position)
-
-				-- Immediately create harvest task
+				-- Create harvest task (this will handle selection, glowing, and queueing)
 				createHarvestTaskRemote:FireServer("add", {
 					resourceId = resourceId,
 					resourceType = resourceType,
 					position = position
 				})
 
+				-- Optimistically add to local selection (server will confirm)
 				selectedResources[resourceId] = {
 					resourceType = resourceType,
 					position = position
@@ -691,54 +688,36 @@ end
 -- REMOTE EVENT HANDLERS
 -- ================================
 
--- Handle server responses about resource selection
-selectResourceRemote.OnClientEvent:Connect(function(action, resourceId, success, message)
-	if action == "select_result" then
-		if not success then
-			selectedResources[resourceId] = nil
-			updateResourceSelectedCount()
-			print("❌ Server rejected selection:", message)
-		end
-	elseif action == "unselect_result" then
-		selectedResources[resourceId] = nil
-		updateResourceSelectedCount()
-	elseif action == "resource_destroyed" then
-		if selectedResources[resourceId] then
-			selectedResources[resourceId] = nil
-			updateResourceSelectedCount()
-			print("💥 Resource destroyed, removed from queue")
-		end
-	end
-end)
-
 -- Handle server responses about task creation
 createHarvestTaskRemote.OnClientEvent:Connect(function(action, success, message, resourceId)
 	if action == "add_result" then
 		if success then
 			print("✅ Harvest task created:", message)
 		else
-			-- Check if it's because resource is already being harvested
-			if message == "Resource already being harvested" then
-				print("⚠️ Resource already being harvested by another unit")
-				-- Remove from local selection since it's already taken
-				if resourceId and selectedResources[resourceId] then
-					selectedResources[resourceId] = nil
-					updateResourceSelectedCount()
-				end
-			else
-				print("❌ Failed to create harvest task:", message)
-				-- Remove from local selection if task creation failed
-				if resourceId and selectedResources[resourceId] then
-					selectedResources[resourceId] = nil
-					updateResourceSelectedCount()
-				end
+			-- Task creation failed - remove from local selection
+			print("❌ Failed to create harvest task:", message)
+			if resourceId and selectedResources[resourceId] then
+				selectedResources[resourceId] = nil
+				updateResourceSelectedCount()
 			end
 		end
 	elseif action == "remove_result" then
 		if success then
 			print("🗑️ Harvest task removed:", message)
+			-- Remove from local selection
+			if resourceId and selectedResources[resourceId] then
+				selectedResources[resourceId] = nil
+				updateResourceSelectedCount()
+			end
 		else
 			print("❌ Failed to remove harvest task:", message)
+		end
+	elseif action == "resource_destroyed" then
+		-- Resource was destroyed/harvested, remove from local selection
+		if resourceId and selectedResources[resourceId] then
+			selectedResources[resourceId] = nil
+			updateResourceSelectedCount()
+			print("💥 Resource destroyed, removed from queue")
 		end
 	end
 end)

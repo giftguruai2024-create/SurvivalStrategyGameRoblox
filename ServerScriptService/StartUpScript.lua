@@ -460,23 +460,7 @@ ClickedRemote.OnServerEvent:Connect(function(player,event,data)
 
 end)
 
--- Handle resource selection
-selectResourceRemote.OnServerEvent:Connect(function(player, action, resourceId, resourceType, position)
-	if not worldState then
-		warn("[Integration] WorldState not available for resource selection")
-		return
-	end
-
-	if action == "select" then
-		local success = worldState:SelectResource(resourceId, resourceType, position, player.Name)
-		selectResourceRemote:FireClient(player, "select_result", resourceId, success)
-	elseif action == "unselect" then
-		local success = worldState:UnselectResource(resourceId)
-		selectResourceRemote:FireClient(player, "unselect_result", resourceId, success)
-	end
-end)
-
--- Handle harvest task creation - IMPROVED VERSION
+-- Handle harvest task creation (combines selection and task creation)
 createHarvestTaskRemote.OnServerEvent:Connect(function(player, action, taskData)
 	if not worldState then
 		warn("[Integration] WorldState not available for task creation")
@@ -490,42 +474,46 @@ createHarvestTaskRemote.OnServerEvent:Connect(function(player, action, taskData)
 			return
 		end
 
-		-- Check if resource is already selected before trying to select it
+		-- Check if resource is already selected/being harvested
 		local isAlreadySelected = worldState:IsResourceSelected(taskData.resourceId)
 
 		if isAlreadySelected then
-			-- Resource is already being harvested - this is not a failure, just inform the user
-			createHarvestTaskRemote:FireClient(player, "add_result", false, "Resource already being harvested", taskData.resourceId)
-			print(string.format("[Integration] %s tried to select already harvested %s resource", player.Name, taskData.resourceType))
+			-- Resource is already being harvested by another unit
+			createHarvestTaskRemote:FireClient(player, "add_result", false, "Already assigned to another unit", taskData.resourceId)
+			print(string.format("[Integration] %s tried to select %s resource that's already assigned", player.Name, taskData.resourceType))
 			return
 		end
 
+		-- Select the resource and create harvest task
 		local success = worldState:SelectResource(
-			taskData.resourceId, 
-			taskData.resourceType, 
-			taskData.position, 
+			taskData.resourceId,
+			taskData.resourceType,
+			taskData.position,
 			player.Name
 		)
 
 		if success then
-			createHarvestTaskRemote:FireClient(player, "add_result", true, "Harvest task created", taskData.resourceId)
-			print(string.format("[Integration] %s created harvest task for %s resource", player.Name, taskData.resourceType))
+			createHarvestTaskRemote:FireClient(player, "add_result", true, "Task queued successfully", taskData.resourceId)
+			print(string.format("[Integration] %s queued harvest task for %s resource", player.Name, taskData.resourceType))
 		else
-			-- This is an actual failure (not just already selected)
-			createHarvestTaskRemote:FireClient(player, "add_result", false, "Failed to create harvest task", taskData.resourceId)
+			createHarvestTaskRemote:FireClient(player, "add_result", false, "Failed to queue task", taskData.resourceId)
+			print(string.format("[Integration] Failed to queue %s task for %s", taskData.resourceType, player.Name))
 		end
 
 	elseif action == "remove" then
-		if not taskData then
+		-- taskData is the resourceId when removing
+		local resourceId = taskData
+		if not resourceId then
 			createHarvestTaskRemote:FireClient(player, "remove_result", false, "No resource ID provided")
 			return
 		end
 
-		local success = worldState:UnselectResource(taskData)
+		local success = worldState:UnselectResource(resourceId)
 		if success then
-			createHarvestTaskRemote:FireClient(player, "remove_result", true, "Harvest task removed")
+			createHarvestTaskRemote:FireClient(player, "remove_result", true, "Task removed successfully", resourceId)
+			print(string.format("[Integration] %s removed harvest task for resource %s", player.Name, resourceId))
 		else
-			createHarvestTaskRemote:FireClient(player, "remove_result", false, "Failed to remove harvest task")
+			createHarvestTaskRemote:FireClient(player, "remove_result", false, "Failed to remove task", resourceId)
 		end
 
 	else
