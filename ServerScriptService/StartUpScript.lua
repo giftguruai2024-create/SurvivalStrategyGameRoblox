@@ -476,23 +476,30 @@ selectResourceRemote.OnServerEvent:Connect(function(player, action, resourceId, 
 	end
 end)
 
--- Handle harvest task creation
-createHarvestTaskRemote.OnServerEvent:Connect(function(player, taskList)
+-- Handle harvest task creation - IMPROVED VERSION
+createHarvestTaskRemote.OnServerEvent:Connect(function(player, action, taskData)
 	if not worldState then
 		warn("[Integration] WorldState not available for task creation")
-		createHarvestTaskRemote:FireClient(player, false, "WorldState not available")
+		createHarvestTaskRemote:FireClient(player, "add_result", false, "WorldState not available")
 		return
 	end
 
-	if not taskList or #taskList == 0 then
-		createHarvestTaskRemote:FireClient(player, false, "No tasks provided")
-		return
-	end
+	if action == "add" then
+		if not taskData then
+			createHarvestTaskRemote:FireClient(player, "add_result", false, "No task data provided")
+			return
+		end
 
-	local tasksCreated = 0
+		-- Check if resource is already selected before trying to select it
+		local isAlreadySelected = worldState:IsResourceSelected(taskData.resourceId)
 
-	-- Process each task in the list
-	for _, taskData in ipairs(taskList) do
+		if isAlreadySelected then
+			-- Resource is already being harvested - this is not a failure, just inform the user
+			createHarvestTaskRemote:FireClient(player, "add_result", false, "Resource already being harvested", taskData.resourceId)
+			print(string.format("[Integration] %s tried to select already harvested %s resource", player.Name, taskData.resourceType))
+			return
+		end
+
 		local success = worldState:SelectResource(
 			taskData.resourceId, 
 			taskData.resourceType, 
@@ -501,14 +508,30 @@ createHarvestTaskRemote.OnServerEvent:Connect(function(player, taskList)
 		)
 
 		if success then
-			tasksCreated = tasksCreated + 1
+			createHarvestTaskRemote:FireClient(player, "add_result", true, "Harvest task created", taskData.resourceId)
+			print(string.format("[Integration] %s created harvest task for %s resource", player.Name, taskData.resourceType))
+		else
+			-- This is an actual failure (not just already selected)
+			createHarvestTaskRemote:FireClient(player, "add_result", false, "Failed to create harvest task", taskData.resourceId)
 		end
+
+	elseif action == "remove" then
+		if not taskData then
+			createHarvestTaskRemote:FireClient(player, "remove_result", false, "No resource ID provided")
+			return
+		end
+
+		local success = worldState:UnselectResource(taskData)
+		if success then
+			createHarvestTaskRemote:FireClient(player, "remove_result", true, "Harvest task removed")
+		else
+			createHarvestTaskRemote:FireClient(player, "remove_result", false, "Failed to remove harvest task")
+		end
+
+	else
+		warn("[Integration] Unknown harvest task action: " .. tostring(action))
+		createHarvestTaskRemote:FireClient(player, "unknown_action", false, "Unknown action")
 	end
-
-	createHarvestTaskRemote:FireClient(player, true, 
-		string.format("Created %d harvest tasks", tasksCreated))
-
-	print(string.format("[Integration] %s created %d harvest tasks", player.Name, tasksCreated))
 end)
 
 -- ========================================
