@@ -28,7 +28,7 @@ local ZOOM_SPEED = 2 -- How fast zoom changes
 local MIN_ZOOM = 20 -- Minimum height above ground
 local MAX_ZOOM = 100 -- Maximum height above ground
 local INITIAL_HEIGHT = 50 -- Starting height above grid center
-local CAMERA_ANGLE = 90 -- Angle of camera (degrees from horizontal) - 90 = straight down
+local CAMERA_ANGLE = 15 -- Angle of camera (degrees from horizontal) - 90 = straight down
 local CHARACTER_OFFSET = 5 -- How far above the camera to keep the character (in studs)
 -- ========================================
 
@@ -74,16 +74,16 @@ local function updateCamera()
 	-- Calculate movement direction based on keys pressed
 	local moveDirection = Vector3.new(0, 0, 0)
 
-	if keysPressed.A then
+	if keysPressed.W then
 		moveDirection = moveDirection + Vector3.new(0, 0, -1) -- Forward (negative Z)
 	end
-	if keysPressed.D then
+	if keysPressed.S then
 		moveDirection = moveDirection + Vector3.new(0, 0, 1) -- Backward (positive Z)
 	end
-	if keysPressed.S then
+	if keysPressed.A then
 		moveDirection = moveDirection + Vector3.new(-1, 0, 0) -- Left (negative X)
 	end
-	if keysPressed.W then
+	if keysPressed.D then
 		moveDirection = moveDirection + Vector3.new(1, 0, 0) -- Right (positive X)
 	end
 
@@ -115,9 +115,10 @@ local function updateCamera()
 		local lookAtPoint = cameraPosition - Vector3.new(0, cameraHeight, 0)
 		camera.CFrame = CFrame.new(cameraPosition, lookAtPoint)
 	else
-		-- Angled view
-		local lookAtOffset = Vector3.new(0, 0, cameraHeight / math.tan(angleRadians))
-		local lookAtPoint = cameraPosition - lookAtOffset
+		-- Angled view - limit the forward distance to prevent camera breaking
+		local maxForwardDistance = math.min(cameraHeight / math.tan(angleRadians), halfGridSize * 0.5)
+		local lookAtOffset = Vector3.new(0, 0, maxForwardDistance)
+		local lookAtPoint = cameraPosition - Vector3.new(0, cameraHeight, 0) - lookAtOffset
 		camera.CFrame = CFrame.new(cameraPosition, lookAtPoint)
 	end
 end
